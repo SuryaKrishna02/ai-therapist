@@ -1,0 +1,5 @@
+requests==2.32.3
+yt-dlp==2024.10.22
+assemblyai==0.34.0
+opencv-python==4.10.0.84
+google-api-python-client==2.149.0
