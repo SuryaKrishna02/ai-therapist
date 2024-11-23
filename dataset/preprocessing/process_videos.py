@@ -93,8 +93,8 @@ def extract_audio(video_path, audio_path):
     subprocess.run(command, check=True)
 
 
-def transcribe_audio_diarization(audio_file, output_txt_file):
-    if os.path.exists(output_txt_file):
+def transcribe_audio_diarization(audio_file, output_txt_file, output_json_file):
+    if os.path.exists(output_json_file) and os.path.exists(output_txt_file):
         print(f"Diarized transcript already exists for {
               audio_file}. Skipping transcription.")
         return
@@ -109,7 +109,12 @@ def transcribe_audio_diarization(audio_file, output_txt_file):
     aai.settings.api_key = ASSEMBLYAI_API_KEY
 
     print(f"Transcribing {audio_file} with speaker diarization...")
-    config = aai.TranscriptionConfig(speaker_labels=True)
+    # Enable word-level timestamps
+    config = aai.TranscriptionConfig(
+        speaker_labels=True,
+        punctuate=True,
+        format_text=True,
+    )
     transcriber = aai.Transcriber()
 
     transcript = transcriber.transcribe(
@@ -125,6 +130,22 @@ def transcribe_audio_diarization(audio_file, output_txt_file):
             f.write(f"{speaker}: {text}\n")
 
     print(f"Diarized transcript saved to {output_txt_file}")
+    # Prepare data for JSON output
+    diarized_output = []
+    for utterance in transcript.utterances:
+        entry = {
+            'speaker': f"Speaker {utterance.speaker}",
+            'start': utterance.start,  # Start time in milliseconds
+            'end': utterance.end,      # End time in milliseconds
+            'text': utterance.text
+        }
+        diarized_output.append(entry)
+
+    # Save the output to a JSON file
+    with open(output_json_file, 'w', encoding='utf-8') as f:
+        json.dump(diarized_output, f, ensure_ascii=False, indent=4)
+
+    print(f"Diarized transcript with timestamps saved to {output_json_file}")
 
 
 def extract_frames(video_path, output_dir, frame_rate=1):
@@ -150,6 +171,45 @@ def extract_frames(video_path, output_dir, frame_rate=1):
             cv2.imwrite(frame_filename, image)
         success, image = vidcap.read()
         count += 1
+
+
+def extract_video_clips(video_path, diarization_json_path, clips_output_dir):
+    os.makedirs(clips_output_dir, exist_ok=True)
+
+    # Load the diarization data
+    with open(diarization_json_path, 'r', encoding='utf-8') as f:
+        diarization_data = json.load(f)
+
+    for idx, entry in enumerate(diarization_data, 1):
+        start_ms = entry['start']
+        end_ms = entry['end']
+        speaker = entry['speaker']
+        text = entry['text']
+
+        # Convert milliseconds to seconds
+        start_sec = start_ms / 1000.0
+        duration_sec = (end_ms - start_ms) / 1000.0
+
+        # Prepare the output filename
+        clip_filename = os.path.join(clips_output_dir, f"clip_{idx:03d}.mp4")
+
+        # Use ffmpeg to extract the clip
+        command = [
+            'ffmpeg',
+            '-y',  # Overwrite output files without asking
+            '-i', video_path,
+            '-ss', str(start_sec),
+            '-t', str(duration_sec),
+            '-c', 'copy',  # Copy codecs (no re-encoding for speed)
+            clip_filename
+        ]
+        try:
+            subprocess.run(command, check=True,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            print(f"Extracted clip {clip_filename} for {speaker}: {text}")
+        except subprocess.CalledProcessError as e:
+            print(f"Failed to extract clip {idx}: {e.stderr.decode('utf-8')}")
+            continue
 
 
 def main():
@@ -196,9 +256,11 @@ def main():
 
             # Paths to the files
             video_file = os.path.join(video_dir, f'{video_id}.mp4')
-            # Changed to .mp3 for AssemblyAI
             audio_file = os.path.join(video_dir, f'{video_id}.wav')
-            transcript_file = os.path.join(video_dir, f'{video_id}.txt')
+            transcript_file = os.path.join(
+                video_dir, f'{video_id}_transcript.txt')
+            transcript_file_timestamp = os.path.join(
+                video_dir, f'{video_id}_transcript_timestamps.json')
             frames_dir = os.path.join(video_dir, 'frames')
 
             # Step 3: Download video
@@ -227,7 +289,8 @@ def main():
             if transcribe_audio_option:
                 print(f"Transcribing audio for {video_id} using AssemblyAI...")
                 try:
-                    transcribe_audio_diarization(audio_file, transcript_file)
+                    transcribe_audio_diarization(
+                        audio_file, transcript_file, transcript_file_timestamp)
                 except Exception as e:
                     print(f"Failed to transcribe audio for {video_id}: {e}")
                     continue
@@ -241,6 +304,20 @@ def main():
                     extract_frames(video_file, frames_dir, frame_rate=1)
                 except Exception as e:
                     print(f"Failed to extract frames for {video_id}: {e}")
+                    continue
+
+            # Step 7: Extract video clips based on timestamps (new addition)
+            extract_clips_option = True  # Set to False if you don't want to extract clips
+            if extract_clips_option:
+                print(f"Extracting video clips for {
+                      video_id}"
+                      "based on timestamps...")
+                try:
+                    clips_dir = os.path.join(video_dir, 'clips')
+                    extract_video_clips(
+                        video_file, transcript_file_timestamp, clips_dir)
+                except Exception as e:
+                    print(f"Failed to extract clips for {video_id}: {e}")
                     continue
 
     print("\nAll processes completed successfully.")
