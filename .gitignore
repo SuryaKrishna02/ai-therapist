@@ -131,6 +131,9 @@ env.bak/
 venv.bak/
 ait-venv/
 
+# data
+data/
+
 # Spyder project settings
 .spyderproject
 .spyproject
