@@ -49,30 +49,89 @@ def get_video_ids_from_playlist(youtube, playlist_id, playlist_dir):
     return video_ids
 
 
-def download_video(video_id, output_dir):
-    video_file = os.path.join(output_dir, f'{video_id}.mp4')
-    if os.path.exists(video_file):
-        print(f"Video {video_id} already downloaded. Skipping download.")
-        return
-
-    ydl_opts = {
-        'format': 'bestvideo+bestaudio/best',
-        'outtmpl': os.path.join(output_dir, '%(id)s.%(ext)s'),
-        'writesubtitles': True,
-        'writeautomaticsub': True,
-        'subtitleslangs': ['en'],
-        'subtitlesformat': 'srt',
-        'merge_output_format': 'mp4',
-    }
-
-    url = f'https://www.youtube.com/watch?v={video_id}'
-
+def get_video_fps(video_file):
+    """
+    Retrieve the frame rate of a video using ffprobe.
+    """
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-    except yt_dlp.utils.DownloadError as e:
-        print(f"Failed to download video {video_id}: {e}")
-        raise
+        result = subprocess.run(
+            ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=r_frame_rate',
+             '-of', 'default=noprint_wrappers=1:nokey=1', video_file],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        fps = result.stdout.strip()
+        if fps:
+            num, denom = map(int, fps.split('/'))
+            return num / denom
+        else:
+            return None
+    except Exception as e:
+        print(f"Failed to retrieve FPS for {video_file}: {e}")
+        return None
+
+
+def download_and_convert_video(video_id, output_dir, target_fps=16):
+    video_file = os.path.join(output_dir, f'{video_id}.mp4')
+    temp_file = os.path.join(output_dir, f'temp_{video_id}.mp4')
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Step 1: Check if the video exists
+    if os.path.exists(video_file):
+        print(f"Video {video_id} already exists. Checking FPS...")
+        current_fps = get_video_fps(video_file)
+        if current_fps is None:
+            print(f"Could not determine FPS for {
+                  video_file}. Skipping conversion.")
+            return
+
+        if round(current_fps) == target_fps:
+            print(f"Video {video_id} is already at {
+                  target_fps}fps. No conversion needed.")
+            return
+
+        print(f"Video {video_id} is at {
+              current_fps}fps. Converting to {target_fps}fps...")
+    else:
+        # Step 2: Download the video
+        ydl_opts = {
+            'format': 'bestvideo+bestaudio/best',
+            'outtmpl': video_file,
+            'merge_output_format': 'mp4',
+        }
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([f'https://www.youtube.com/watch?v={video_id}'])
+        except yt_dlp.utils.DownloadError as e:
+            print(f"Failed to download video {video_id}: {e}")
+            return
+
+    # Step 3: Convert to target FPS
+    try:
+        subprocess.run([
+            'ffmpeg',
+            '-i', video_file,
+            '-r', str(target_fps),  # Set the frame rate
+            '-c:v', 'libx264',  # Use H.264 codec for video compression
+            # Set quality level (23 is default, lower is better quality)
+            '-crf', '23',
+            '-preset', 'fast',  # Set encoding speed
+            '-c:a', 'aac',      # Use AAC codec for audio
+            '-strict', 'experimental',
+            temp_file
+        ], check=True)
+
+        # Replace the original file with the converted one
+        os.replace(temp_file, video_file)
+        print(f"Video {video_id} successfully converted to {target_fps}fps.")
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to convert video {video_id} to {target_fps}fps: {e}")
+        # Clean up temporary file in case of failure
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
 
 
 def extract_audio(video_path, audio_path):
@@ -173,6 +232,25 @@ def extract_frames(video_path, output_dir, frame_rate=1):
         count += 1
 
 
+def get_video_duration(video_file):
+    """
+    Retrieve the duration of a video using ffprobe.
+    """
+    try:
+        result = subprocess.run(
+            ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+             '-of', 'default=noprint_wrappers=1:nokey=1', video_file],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        duration = float(result.stdout.strip())
+        return duration
+    except Exception as e:
+        print(f"Failed to retrieve duration for {video_file}: {e}")
+        return None
+
+
 def extract_video_clips(video_path, diarization_json_path, clips_output_dir):
     os.makedirs(clips_output_dir, exist_ok=True)
 
@@ -192,8 +270,21 @@ def extract_video_clips(video_path, diarization_json_path, clips_output_dir):
 
         # Prepare the output filename
         clip_filename = os.path.join(clips_output_dir, f"clip_{idx:03d}.mp4")
-
+        # Check if the file already exists
+        if os.path.exists(clip_filename):
+            existing_duration = get_video_duration(clip_filename)
+            if existing_duration is not None and existing_duration >= 3:
+                print(f"Skipping clip {idx}: File already exists with sufficient duration ({
+                      existing_duration:.2f}s).")
+                continue
+            else:
+                print(f"Deleting clip {
+                      idx}: Existing file is too short ({existing_duration:.2f}s).")
+                os.remove(clip_filename)
         # Use ffmpeg to extract the clip
+        if (end_ms - start_ms) < 3000:
+            print(f"Skipping clip {idx}: Duration less than 3 seconds.")
+            continue
         command = [
             'ffmpeg',
             '-y',  # Overwrite output files without asking
@@ -256,7 +347,7 @@ def main():
 
             # Paths to the files
             video_file = os.path.join(video_dir, f'{video_id}.mp4')
-            audio_file = os.path.join(video_dir, f'{video_id}.wav')
+            audio_file = os.path.join(video_dir, f'{video_id}.mp3')
             transcript_file = os.path.join(
                 video_dir, f'{video_id}_transcript.txt')
             transcript_file_timestamp = os.path.join(
@@ -266,7 +357,7 @@ def main():
             # Step 3: Download video
             print(f"Downloading video for {video_id}...")
             try:
-                download_video(video_id, video_dir)
+                download_and_convert_video(video_id, video_dir)
             except Exception as e:
                 print(f"Failed to download video {video_id}: {e}")
                 continue  # Skip to the next video
