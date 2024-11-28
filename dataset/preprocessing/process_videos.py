@@ -113,6 +113,7 @@ def download_and_convert_video(video_id, output_dir, target_fps=16):
     try:
         subprocess.run([
             'ffmpeg',
+            '-y',
             '-i', video_file,
             '-r', str(target_fps),  # Set the frame rate
             '-c:v', 'libx264',  # Use H.264 codec for video compression
