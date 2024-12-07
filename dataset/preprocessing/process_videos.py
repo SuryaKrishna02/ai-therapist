@@ -172,6 +172,7 @@ def transcribe_audio_diarization(audio_file, output_txt_file, output_json_file):
     # Enable word-level timestamps
     config = aai.TranscriptionConfig(
         speaker_labels=True,
+        speakers_expected=2,
         punctuate=True,
         format_text=True,
     )
