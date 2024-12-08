@@ -6,7 +6,6 @@ import vertexai
 import colorlog
 from typing import Dict, Optional
 from google.api_core import exceptions
-from vertexai import generative_models
 from ratelimit import limits, sleep_and_retry
 from vertexai.generative_models import GenerativeModel, Part
 from constants import (
@@ -177,10 +176,11 @@ class TranscriptAnnotator:
             video_path = entry["path"]
             dialogue = entry["transcript"]
             context = entry["previous_transcript"]
+            is_corrupted = entry["corrupted"] == "Yes"
 
             # Client clips
             if role == "client":
-                if is_short:
+                if is_short or is_corrupted:
                     # Text emotion detection for short client clips
                     prompt = TEXT_EMOTION_TEMPLATE.format(role=role, dialogue=dialogue)
                     response = await self.call_model(TEXT_EMOTION_DETECTION, prompt)
@@ -196,7 +196,7 @@ class TranscriptAnnotator:
 
             # Therapist clips
             else:
-                if is_short:
+                if is_short or is_corrupted:
                     # Text emotion detection and strategy prediction for short therapist clips
                     prompt = TEXT_EMOTION_TEMPLATE.format(role=role, dialogue=dialogue)
                     response = await self.call_model(TEXT_EMOTION_DETECTION, prompt)

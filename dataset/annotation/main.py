@@ -20,14 +20,14 @@ try:
 except Exception as e:
     print(f"Error processing transcripts: {str(e)}")
 
-try:
-    # Initialize annotator
-    annotator = TranscriptAnnotator(
-        model_name=MODEL_NAME
-    )
+# try:
+#     # Initialize annotator
+#     annotator = TranscriptAnnotator(
+#         model_name=MODEL_NAME
+#     )
 
-    # Run processing
-    asyncio.run(annotator.process_transcripts(input_transcripts_file, output_transcripts_file))
+#     # Run processing
+#     asyncio.run(annotator.process_transcripts(input_transcripts_file, output_transcripts_file))
 
-except Exception as e:
-    print(f"Error annotating videos: {str(e)}")
+# except Exception as e:
+#     print(f"Error annotating videos: {str(e)}")
