@@ -1,7 +1,6 @@
 import os
 import json
 import yt_dlp
-import cv2
 import subprocess
 import time
 import requests
@@ -13,8 +12,10 @@ import assemblyai as aai
 def get_video_ids_from_playlist(youtube, playlist_id, playlist_dir):
     video_ids_file = os.path.join(playlist_dir, 'video_ids.json')
     if os.path.exists(video_ids_file):
-        print(f"Video IDs already retrieved for playlist {
-              playlist_id}. Loading from file.")
+        print(
+            f"Video IDs already retrieved for playlist {
+                playlist_id}. Loading from file."
+        )
         with open(video_ids_file, 'r') as f:
             video_ids = json.load(f)
         return video_ids
@@ -83,17 +84,21 @@ def download_and_convert_video(video_id, output_dir, target_fps=16):
         print(f"Video {video_id} already exists. Checking FPS...")
         current_fps = get_video_fps(video_file)
         if current_fps is None:
-            print(f"Could not determine FPS for {
-                  video_file}. Skipping conversion.")
-            return
-
+            print(
+                f"Could not determine FPS for {
+                    video_file}. Possibly corrupted or no video track."
+            )
+            return False  # Indicates failure or corrupted
         if round(current_fps) == target_fps:
-            print(f"Video {video_id} is already at {
-                  target_fps}fps. No conversion needed.")
-            return
-
-        print(f"Video {video_id} is at {
-              current_fps}fps. Converting to {target_fps}fps...")
+            print(
+                f"Video {video_id} is already at {
+                    target_fps}fps. No conversion needed."
+            )
+            return True
+        print(
+            f"Video {video_id} is at {
+                current_fps}fps. Converting to {target_fps}fps..."
+        )
     else:
         # Step 2: Download the video
         ydl_opts = {
@@ -107,7 +112,7 @@ def download_and_convert_video(video_id, output_dir, target_fps=16):
                 ydl.download([f'https://www.youtube.com/watch?v={video_id}'])
         except yt_dlp.utils.DownloadError as e:
             print(f"Failed to download video {video_id}: {e}")
-            return
+            return False
 
     # Step 3: Convert to target FPS
     try:
@@ -116,11 +121,10 @@ def download_and_convert_video(video_id, output_dir, target_fps=16):
             '-y',
             '-i', video_file,
             '-r', str(target_fps),  # Set the frame rate
-            '-c:v', 'libx264',  # Use H.264 codec for video compression
-            # Set quality level (23 is default, lower is better quality)
-            '-crf', '23',
-            '-preset', 'fast',  # Set encoding speed
-            '-c:a', 'aac',      # Use AAC codec for audio
+            '-c:v', 'libx264',      # Use H.264 codec for video compression
+            '-crf', '23',           # Set quality level
+            '-preset', 'fast',      # Set encoding speed
+            '-c:a', 'aac',          # Use AAC codec for audio
             '-strict', 'experimental',
             temp_file
         ], check=True)
@@ -128,11 +132,21 @@ def download_and_convert_video(video_id, output_dir, target_fps=16):
         # Replace the original file with the converted one
         os.replace(temp_file, video_file)
         print(f"Video {video_id} successfully converted to {target_fps}fps.")
+
+        # Double-check if video track exists after conversion
+        final_fps = get_video_fps(video_file)
+        if final_fps is None:
+            print(
+                f"Video {video_id} appears to have no video track. Marking as corrupted.")
+            return False
+
+        return True
     except subprocess.CalledProcessError as e:
         print(f"Failed to convert video {video_id} to {target_fps}fps: {e}")
         # Clean up temporary file in case of failure
         if os.path.exists(temp_file):
             os.remove(temp_file)
+        return False
 
 
 def extract_audio(video_path, audio_path):
@@ -191,6 +205,7 @@ def transcribe_audio_diarization(audio_file, output_txt_file, output_json_file):
             f.write(f"{speaker}: {text}\n")
 
     print(f"Diarized transcript saved to {output_txt_file}")
+
     # Prepare data for JSON output
     diarized_output = []
     for utterance in transcript.utterances:
@@ -207,31 +222,6 @@ def transcribe_audio_diarization(audio_file, output_txt_file, output_json_file):
         json.dump(diarized_output, f, ensure_ascii=False, indent=4)
 
     print(f"Diarized transcript with timestamps saved to {output_json_file}")
-
-
-def extract_frames(video_path, output_dir, frame_rate=1):
-    if os.path.exists(output_dir) and os.listdir(output_dir):
-        print(f"Frames already extracted for {
-              os.path.basename(video_path)}. Skipping frame extraction.")
-        return
-
-    os.makedirs(output_dir, exist_ok=True)
-    vidcap = cv2.VideoCapture(video_path)
-    success, image = vidcap.read()
-    count = 0
-    fps = vidcap.get(cv2.CAP_PROP_FPS)
-    if fps == 0 or fps is None:
-        fps = 30  # Default fps if unable to get from video
-    interval = max(int(fps / frame_rate), 1)
-
-    while success:
-        if count % interval == 0:
-            frame_id = int(count / interval)
-            frame_filename = os.path.join(
-                output_dir, f"frame_{frame_id:05d}.jpg")
-            cv2.imwrite(frame_filename, image)
-        success, image = vidcap.read()
-        count += 1
 
 
 def get_video_duration(video_file):
@@ -283,7 +273,7 @@ def extract_video_clips(video_path, diarization_json_path, clips_output_dir):
                 print(f"Deleting clip {
                       idx}: Existing file is too short ({existing_duration:.2f}s).")
                 os.remove(clip_filename)
-        # Use ffmpeg to extract the clip
+        # Skip short clips
         if (end_ms - start_ms) < 3000:
             print(f"Skipping clip {idx}: Duration less than 3 seconds.")
             continue
@@ -327,24 +317,23 @@ def main():
     data_dir = 'data'
     os.makedirs(data_dir, exist_ok=True)
 
-    for playlist_id in playlist_ids:
+    for playlist_idx, playlist_id in enumerate(playlist_ids, start=1):
         print(f"\nProcessing playlist {playlist_id}...")
 
-        # Create directory for the playlist
-        playlist_dir = os.path.join(data_dir, playlist_id)
+        # Create directory for the playlist with the new naming scheme
+        playlist_dir = os.path.join(data_dir, f'playlist_{playlist_idx}')
         os.makedirs(playlist_dir, exist_ok=True)
 
-        # Step 2: Retrieve video IDs
+        # Retrieve video IDs
         video_ids = get_video_ids_from_playlist(
             youtube, playlist_id, playlist_dir)
-
         print(f"Retrieved {len(video_ids)} videos from playlist {playlist_id}")
 
-        for idx, video_id in enumerate(video_ids, 1):
-            print(f"\nProcessing video {idx}/{len(video_ids)}: {video_id}")
+        for vid_idx, video_id in enumerate(video_ids, 1):
+            print(f"\nProcessing video {vid_idx}/{len(video_ids)}: {video_id}")
 
-            # Create directory for the video
-            video_dir = os.path.join(playlist_dir, video_id)
+            # Create directory for the video with the new naming scheme
+            video_dir = os.path.join(playlist_dir, f'video_{vid_idx}')
             os.makedirs(video_dir, exist_ok=True)
 
             # Paths to the files
@@ -354,22 +343,22 @@ def main():
                 video_dir, f'{video_id}_transcript.txt')
             transcript_file_timestamp = os.path.join(
                 video_dir, f'{video_id}_transcript_timestamps.json')
-            frames_dir = os.path.join(video_dir, 'frames')
 
-            # Step 3: Download video
+            # Download video
             print(f"Downloading video for {video_id}...")
             try:
-                download_and_convert_video(video_id, video_dir)
+                success = download_and_convert_video(video_id, video_dir)
             except Exception as e:
                 print(f"Failed to download video {video_id}: {e}")
                 continue  # Skip to the next video
 
-            # Check if video file exists
-            if not os.path.exists(video_file):
-                print(f"Video file not found for {video_id}")
+            # If download or conversion failed or video is corrupted, skip further steps
+            if not success or not os.path.exists(video_file):
+                print(
+                    f"Video {video_id} is corrupted or failed to download. Skipping...")
                 continue
 
-            # Step 4: Extract audio
+            # Extract audio
             print(f"Extracting audio for {video_id}...")
             try:
                 extract_audio(video_file, audio_file)
@@ -377,8 +366,8 @@ def main():
                 print(f"Failed to extract audio for {video_id}: {e}")
                 continue
 
-            # Step 5: Transcribe audio using AssemblyAI with speaker diarization
-            transcribe_audio_option = True  # Set to False if you don't want to transcribe audio
+            # Transcribe audio with speaker diarization
+            transcribe_audio_option = True
             if transcribe_audio_option:
                 print(f"Transcribing audio for {video_id} using AssemblyAI...")
                 try:
@@ -388,23 +377,11 @@ def main():
                     print(f"Failed to transcribe audio for {video_id}: {e}")
                     continue
 
-            # Step 6: Extract frames (optional)
-            extract_frames_option = True  # Set to False if you don't want to extract frames
-            if extract_frames_option:
-                print(f"Extracting frames for {video_id}...")
-                try:
-                    # Adjust frame_rate as needed
-                    extract_frames(video_file, frames_dir, frame_rate=1)
-                except Exception as e:
-                    print(f"Failed to extract frames for {video_id}: {e}")
-                    continue
-
-            # Step 7: Extract video clips based on timestamps (new addition)
-            extract_clips_option = True  # Set to False if you don't want to extract clips
+            # Extract clips from video based on transcription timestamps
+            extract_clips_option = True
             if extract_clips_option:
                 print(f"Extracting video clips for {
-                      video_id}"
-                      "based on timestamps...")
+                      video_id} based on timestamps...")
                 try:
                     clips_dir = os.path.join(video_dir, 'clips')
                     extract_video_clips(
