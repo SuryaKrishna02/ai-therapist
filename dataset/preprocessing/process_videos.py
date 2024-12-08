@@ -74,8 +74,8 @@ def get_video_fps(video_file):
 
 
 def download_and_convert_video(video_id, output_dir, target_fps=16):
-    video_file = os.path.join(output_dir, f'{video_id}.mp4')
-    temp_file = os.path.join(output_dir, f'temp_{video_id}.mp4')
+    video_file = os.path.join(output_dir, 'video_id.mp4')
+    temp_file = os.path.join(output_dir, 'temp_video.mp4')
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -280,10 +280,11 @@ def extract_video_clips(video_path, diarization_json_path, clips_output_dir):
         command = [
             'ffmpeg',
             '-y',  # Overwrite output files without asking
-            '-i', video_path,
-            '-ss', str(start_sec),
-            '-t', str(duration_sec),
-            '-c', 'copy',  # Copy codecs (no re-encoding for speed)
+            '-ss', str(start_sec),  # Fast seek to start time
+            '-i', video_path,  # Input video path
+            '-t', str(duration_sec),  # Clip duration
+            '-c:v', 'libx264', '-crf', '23', '-preset', 'fast',  # Re-encode video
+            '-c:a', 'aac',  # Re-encode audio
             clip_filename
         ]
         try:
@@ -337,12 +338,12 @@ def main():
             os.makedirs(video_dir, exist_ok=True)
 
             # Paths to the files
-            video_file = os.path.join(video_dir, f'{video_id}.mp4')
-            audio_file = os.path.join(video_dir, f'{video_id}.mp3')
+            video_file = os.path.join(video_dir, 'video.mp4')
+            audio_file = os.path.join(video_dir, 'audio.mp3')
             transcript_file = os.path.join(
-                video_dir, f'{video_id}_transcript.txt')
+                video_dir, 'transcript.txt')
             transcript_file_timestamp = os.path.join(
-                video_dir, f'{video_id}_transcript_timestamps.json')
+                video_dir, 'transcript_timestamps.json')
 
             # Download video
             print(f"Downloading video for {video_id}...")
