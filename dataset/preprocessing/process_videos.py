@@ -74,7 +74,7 @@ def get_video_fps(video_file):
 
 
 def download_and_convert_video(video_id, output_dir, target_fps=16):
-    video_file = os.path.join(output_dir, 'video_id.mp4')
+    video_file = os.path.join(output_dir, 'video.mp4')
     temp_file = os.path.join(output_dir, 'temp_video.mp4')
 
     os.makedirs(output_dir, exist_ok=True)
