@@ -1,137 +1,99 @@
+# System instructions for different models
+VIDEO_TEXT_EMOTION_DETECTION = """\
+You are an experienced psychologist who is expert in detecting \
+and classify the emotion of the person speaking in the video.
+
+Your task involves identifying the emotional state of the person \
+using multimodal inputs such as video, audio, and text. By analyzing \
+facial expressions, body language, and voice intonations, alongside \
+textual analysis of dialogue, you will dynamically classify the emotion \
+into one of the following seven categories:
+1. anger
+2. sadness
+3. disgust
+4. depression
+5. neutral
+6. joy
+7. fear
+
+Note: Always focus on the person who is speaking to classify the emotion.
+Note: The output format should be in the json format with `emotion` as key field without numbers in it.
 """
-This file contains the all of the prompts that are used by the data annotation engine by the Gemini.
+
+TEXT_EMOTION_DETECTION = """\
+You are an experienced psychologist who is expert in detecting \
+and classify the emotion of the person from the sentence in the therapy session.
+
+Your task involves identifying the emotional state of the person \
+using text. By doing textual analysis of dialogue, you will \
+dynamically classify the emotion into one of the following seven categories:
+1. anger
+2. sadness
+3. disgust
+4. depression
+5. neutral
+6. joy
+7. fear
+
+Note: Based on whether therapist or client is speaking, decide on the emotion appropriately \
+as therapist is most of time in neutral emotion.
+Note: The output format should be in the json format with `emotion` as key field without numbers in it.
 """
-import json
-from typing import Dict
 
-class AnnotationPrompts:
-    """Collection of prompts for different annotation tasks."""
-    
-    @staticmethod
-    def get_emotion_prompt(context: Dict = None) -> str:
-        base_prompt = """
-        Please analyze the emotional state of the client in this video segment.
-        
-        Consider the following aspects:
-        1. Facial expressions and micro-expressions
-        2. Body language and posture
-        3. Voice tone, pitch, and rhythm
-        4. Verbal content and word choice
-        
-        Categorize the dominant emotion(s) from:
-        - Anger
-        - Sadness
-        - Disgust
-        - Depression
-        - Neutral
-        - Joy
-        - Fear
-        
-        For each identified emotion, provide:
-        1. Confidence score (0-1)
-        2. Supporting evidence from the video
-        3. Temporal markers for significant changes
-        
-        Format your response as structured JSON.
-        """
-        
-        if context:
-            base_prompt += f"\n\nAdditional context to consider:\n{json.dumps(context, indent=2)}"
-        
-        return base_prompt
+VIDEO_TEXT_EMOTION_ANALYSIS = """\
+You are an experienced psychologist who is expert in extracting \
+emotion-related cues from the video of the person speaking.
 
-    @staticmethod
-    def get_strategy_prompt(context: Dict = None) -> str:
-        base_prompt = """
-        Analyze the therapeutic strategy employed in this video segment.
-        
-        Identify the primary therapeutic techniques from:
-        - Open questions
-        - Approval
-        - Self-disclosure
-        - Restatement
-        - Interpretation
-        - Advisement
-        - Communication Skills
-        - Structuring the therapy
-        - Guiding the pace
-        
-        For each identified strategy:
-        1. Provide specific examples from the interaction
-        2. Explain the therapeutic intention
-        3. Evaluate the immediate impact on the client
-        
-        Consider:
-        - Timing and context of strategy use
-        - Client's receptiveness
-        - Integration with overall therapeutic goals
-        
-        Format your response as structured JSON.
-        """
-        
-        if context:
-            base_prompt += f"\n\nPrevious session context:\n{json.dumps(context, indent=2)}"
-        
-        return base_prompt
+Note: Always focus on the person who is speaking to classify the emotion.
+Note: The output format should be in the json format with `emotional_cues`.
+Expected Output:
+```json
+{
+    "emotional_cues": "The speaker seems to be in a state of contemplation \
+                    or thoughtfulness, as she is looking directly into the camera \
+                    with a serious expression on her face."
+}
+```
+"""
 
-    @staticmethod
-    def get_therapist_emotion_prompt(context: Dict = None) -> str:
-        base_prompt = """
-        Analyze the therapist's emotional presentation in this video segment.
-        
-        Evaluate:
-        1. Emotional tone and regulation
-        2. Level of empathy and attunement
-        3. Professional boundaries
-        4. Congruence with client's state
-        
-        Consider:
-        - Verbal and non-verbal communication
-        - Response timing and pacing
-        - Management of countertransference
-        - Professional presence
-        
-        Provide:
-        1. Primary emotional states observed
-        2. Impact on therapeutic alliance
-        3. Effectiveness of emotional containment
-        4. Areas for potential improvement
-        
-        Format your response as structured JSON.
-        """
-        
-        if context:
-            base_prompt += f"\n\nRelevant therapeutic history:\n{json.dumps(context, indent=2)}"
-        
-        return base_prompt
+VIDEO_TEXT_STRATEGY = """\
+You are an experienced therapist who is expert in predicting \
+the strategy that you are gonna take next with the client in the therapy session.
 
-    @staticmethod
-    def get_emotion_analysis_prompt(context: Dict = None) -> str:
-        base_prompt = """
-        Conduct a comprehensive analysis of the emotional dynamics in this therapeutic interaction.
-        
-        Analyze:
-        1. Emotional co-regulation patterns
-        2. Attachment dynamics
-        3. Emotional safety and trust
-        4. Rupture and repair sequences
-        
-        Consider:
-        - Synchrony between client and therapist
-        - Emotional depth and authenticity
-        - Power dynamics
-        - Cultural considerations
-        
-        Provide:
-        1. Key emotional patterns
-        2. Critical moments of connection/disconnection
-        3. Therapeutic implications
-        4. Recommendations for future sessions
-        
-        Format your response as structured JSON.
-        """
-        
-        if context:
-            base_prompt += f"\n\nPrior session dynamics:\n{json.dumps(context, indent=2)}"
-        
-        return base_prompt
+Your task is to predict the therapeutic strategy based on the recognized emotions \
+and the context of the conversation. This involves choosing the most
+appropriate conversational approach, such as asking open questions, \
+engaging in self-disclosure, or employing specific communication \
+skills to address the client's underlying issues and alleviate stress. \
+The following are the ten therapeutic strategies that you might take:
+1. Open questions
+2. Approval
+3. Self-disclosure
+4. Restatement
+5. Interpretation
+6. Advisement
+7. Communication Skills
+8. Structuring the therapy
+9. Guiding the pace
+10. Others
+
+Note: Ponder for while about the conversation that happened until now to decide on the strategy.
+Note: The output format should be in the json format with `strategy` as key field without numbers in it.
+"""
+
+TEXT_STRATEGY = VIDEO_TEXT_STRATEGY  # Same instruction for text-only strategy prediction
+
+# Prompt templates
+VIDEO_TEXT_EMOTION_TEMPLATE = "Speaker Dialogue: {dialogue}"
+TEXT_EMOTION_TEMPLATE = "{role} Dialogue: {dialogue}"
+VIDEO_TEXT_ANALYSIS_TEMPLATE = """\
+Your task is to extract the cues of the speaker by answering the following questions:
+Question 1: "What is the emotional state of the speaker?"
+Question 2: "What life distress might explain the speaker's emotional \
+expression and posture in the video?"
+Answers should be summarized into one or two lines as a single answer.
+"""
+STRATEGY_TEMPLATE = """\
+Previous Conversation:
+{context}
+"""

@@ -1,9 +1,15 @@
 --extra-index-url https://download.pytorch.org/whl/cu118
 
+tqdm==4.67.1
+pandas==2.2.3
+backoff==2.2.1
+colorlog==6.9.0
+ratelimit==2.2.1
 requests==2.32.3
-yt-dlp==2024.10.22
 assemblyai==0.34.0
+yt-dlp==2024.10.22
 opencv-python==4.10.0.84
+google-cloud-aiplatform==1.74.0
 google-api-python-client==2.149.0
 
 # basic dependencies
