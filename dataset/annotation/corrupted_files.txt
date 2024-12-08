@@ -1,0 +1,2 @@
+gs://ai-therapist-data/playlist_1/video_1/clips/clip_007.mp4
+gs://ai-therapist-data/playlist_1/video_1/clips/clip_010.mp4

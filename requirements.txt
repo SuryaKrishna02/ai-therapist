@@ -1,6 +1,9 @@
 --extra-index-url https://download.pytorch.org/whl/cu118
 
 pandas==2.2.3
+backoff==2.2.1
+colorlog==6.9.0
+ratelimit==2.2.1
 requests==2.32.3
 assemblyai==0.34.0
 yt-dlp==2024.10.22
