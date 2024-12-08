@@ -1,5 +1,6 @@
 --extra-index-url https://download.pytorch.org/whl/cu118
 
+tqdm==4.67.1
 pandas==2.2.3
 backoff==2.2.1
 colorlog==6.9.0
