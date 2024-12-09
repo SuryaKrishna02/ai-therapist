@@ -3,8 +3,7 @@ from annotate import TranscriptAnnotator
 from preprocessor import TranscriptProcessor
 from constants import (
     PROJECT_ID,
-    DATA_BUCKET_NAME,
-    MODEL_NAME
+    DATA_BUCKET_NAME
 )
 
 processed_transcripts_path = "processed_transcripts.json"
@@ -21,7 +20,7 @@ except Exception as e:
 
 try:
     annotator = TranscriptAnnotator(
-        model_name=MODEL_NAME
+        use_local=True
     )
 
     asyncio.run(annotator.process_transcripts(

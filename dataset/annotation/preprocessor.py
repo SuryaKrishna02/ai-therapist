@@ -84,9 +84,6 @@ class TranscriptStatistics:
     def __init__(self):
         """
         Initialize statistics tracking with default values for all counters and collections.
-        
-        Sets up the logging configuration and initializes all statistics counters and
-        collections to their default values.
         """
         self.logger = setup_logging(f"{__name__}.TranscriptStatistics")
         self.format_zero_string = "0 (0.00%)"
@@ -129,7 +126,6 @@ class TranscriptStatistics:
         total_conversations = len(self.therapist_words) + len(self.client_words)
         avg_total_words = total_words / total_conversations if total_conversations > 0 else 0
         
-        self.logger.debug("Calculated word statistics")
         return {
             "avg_therapist_words": round(avg_therapist_words, 2),
             "avg_client_words": round(avg_client_words, 2),
@@ -151,7 +147,6 @@ class TranscriptStatistics:
         avg_therapist_turns = sum(self.therapist_turns_per_video.values()) / len(self.therapist_turns_per_video) if self.therapist_turns_per_video else 0
         avg_client_turns = sum(self.client_turns_per_video.values()) / len(self.client_turns_per_video) if self.client_turns_per_video else 0
         
-        self.logger.debug("Calculated turn statistics")
         return {
             "avg_therapist_turns": round(avg_therapist_turns, 2),
             "avg_client_turns": round(avg_client_turns, 2)
@@ -189,10 +184,6 @@ class TranscriptStatistics:
             Dict[str, str]: Dictionary containing:
                 - total: Total duration in HH:MM:SS format
                 - average: Average duration in seconds (if count provided)
-                
-        Example:
-            >>> _format_duration(3600000, 10)
-            {'total': '1:00:00', 'average': '360.00s'}
         """
         result = {
             "total": str(timedelta(milliseconds=duration_ms)) if duration_ms > 0 else "0:00:00"
@@ -230,7 +221,7 @@ class TranscriptStatistics:
             "Long Clips": self._format_percentage(self.num_long_clips, self.num_total_clips),
             "Long Clips Total Duration": long_durations["total"],
             "Average Long Clip Duration": long_durations["average"],
-            "Normal Clips (Not corrupted, Not short)": self._format_percentage(self.num_normal_clips, self.num_total_clips),
+            "Normal Clips": self._format_percentage(self.num_normal_clips, self.num_total_clips),
             "Normal Clips Total Duration": normal_durations["total"],
             "Average Normal Clip Duration": normal_durations["average"]
         }
@@ -294,16 +285,11 @@ class TranscriptStatistics:
             - Conversation Statistics
             - Turn Taking Analysis
             - Word Count Analysis
-            
-        Each category is logged using the configured logger with appropriate
-        formatting and organization.
         """
-        self.logger.info("Generating comprehensive statistics report")
         word_stats = self.calculate_word_stats()
         turn_stats = self.calculate_turn_stats()
         total_convs = self.num_therapist_convs + self.num_client_convs
         
-        # Compile all statistics
         stats = {
             "Dataset Overview": {
                 "Number of Playlists": self.num_playlists,
@@ -316,8 +302,7 @@ class TranscriptStatistics:
             "Conversation Statistics": self._get_conversation_statistics(total_convs),
             "Turn Taking Analysis": {
                 "Average Therapist Turns per Video": turn_stats["avg_therapist_turns"],
-                "Average Client Turns per Video": turn_stats["avg_client_turns"],
-                "Total Turns per Video": f"{turn_stats['avg_therapist_turns'] + turn_stats['avg_client_turns']:.2f}"
+                "Average Client Turns per Video": turn_stats["avg_client_turns"]
             },
             "Word Count Analysis": {
                 "Average Words per Therapist Turn": word_stats["avg_therapist_words"],
@@ -326,7 +311,6 @@ class TranscriptStatistics:
             }
         }
         
-        # Display statistics
         self.logger.info("\n=== Dataset Statistics ===")
         for category, category_stats in stats.items():
             self.logger.info(f"\n{category}:")
@@ -335,55 +319,73 @@ class TranscriptStatistics:
 
 class TranscriptProcessor:
     """
-    A class for processing transcript files from Google Cloud Storage.
+    A class for processing transcript files from either Google Cloud Storage or local directory.
     
-    This class handles the extraction, analysis, and processing of transcript
-    files stored in Google Cloud Storage. It manages temporary file storage,
+    This class handles the extraction, analysis, and processing of transcript files stored
+    either in Google Cloud Storage or in a local directory. It manages temporary file storage,
     corruption checking, and statistical analysis of the processed transcripts.
     
     Attributes:
-        bucket_name (str): Name of the GCS bucket containing data
-        storage_client (storage.Client): Google Cloud Storage client
-        bucket (storage.Bucket): GCS bucket instance
+        storage_type (str): Type of storage ('gcs' or 'local')
+        base_path (str): Base path for local storage or bucket name for GCS
+        storage_client (storage.Client): Google Cloud Storage client (if using GCS)
+        bucket (storage.Bucket): GCS bucket instance (if using GCS)
         statistics (TranscriptStatistics): Statistics tracking instance
         temp_dir (Path): Path to temporary file storage directory
         logger (logging.Logger): Logger instance for this class
     """
     
-    def __init__(self, bucket_name: str, project_id: str = None):
+    def __init__(self, base_path: str, storage_type: str = 'local', project_id: str = None):
         """
-        Initialize the TranscriptProcessor with Google Cloud Storage bucket.
+        Initialize the TranscriptProcessor with either GCS bucket or local directory.
         
         Args:
-            bucket_name (str): Name of the GCS bucket containing data
-            project_id (str, optional): Google Cloud Project ID. Defaults to None.
+            base_path (str): Base path for local storage or bucket name for GCS
+            storage_type (str): Type of storage ('gcs' or 'local'). Defaults to 'local'
+            project_id (str, optional): Google Cloud Project ID. Required for GCS.
         
         Raises:
-            google.cloud.exceptions.NotFound: If bucket doesn't exist
+            ValueError: If storage_type is invalid or requirements not met
+            google.cloud.exceptions.NotFound: If GCS bucket doesn't exist
             google.auth.exceptions.DefaultCredentialsError: If GCP credentials are invalid
         """
+        if storage_type not in ['gcs', 'local']:
+            raise ValueError("storage_type must be either 'gcs' or 'local'")
+            
+        if storage_type == 'gcs' and project_id is None:
+            raise ValueError("project_id is required for GCS storage")
+            
         self.logger = setup_logging(f"{__name__}.TranscriptProcessor")
+        self.storage_type = storage_type
+        self.base_path = base_path
+        self.file_not_found_error = "File Not Found"
         
         # Set up temporary directory
         self.temp_dir = Path("tmp")
         self.temp_dir.mkdir(exist_ok=True)
         self.logger.info(f"Created temporary directory at {self.temp_dir}")
         
-        self.bucket_name = bucket_name
-        self.storage_client = storage.Client(project=project_id)
-        self.bucket = self.storage_client.bucket(bucket_name)
+        # Initialize storage client if using GCS
+        if storage_type == 'gcs':
+            self.storage_client = storage.Client(project=project_id)
+            self.bucket = self.storage_client.bucket(base_path)
+            self.logger.info(f"Connected to GCS bucket: {base_path}")
+        else:
+            self.storage_client = None
+            self.bucket = None
+            if not os.path.exists(base_path):
+                os.makedirs(base_path)
+                self.logger.info(f"Created local directory: {base_path}")
+            self.logger.info(f"Using local directory: {base_path}")
+            
         self.statistics = TranscriptStatistics()
-        
-        self.logger.info(f"Connected to bucket: {self.bucket_name}")
-        self.logger.info(f"Bucket exists: {self.bucket.exists()}")
-    
+
     def __del__(self):
         """
         Cleanup temporary files when the object is destroyed.
         
-        Note:
-            Uses print instead of logger during cleanup to avoid issues
-            during interpreter shutdown when logging might not be available.
+        This method ensures proper cleanup of temporary files and directories
+        when the TranscriptProcessor instance is being destroyed.
         """
         try:
             if hasattr(self, 'temp_dir') and self.temp_dir.exists():
@@ -391,7 +393,56 @@ class TranscriptProcessor:
                 print(f"Cleaned up temporary directory: {self.temp_dir}")
         except Exception as e:
             print(f"Error cleaning up temporary directory: {str(e)}")
-    
+
+    def read_json_from_storage(self, path: str) -> Dict:
+        """
+        Read JSON file from either GCS or local storage.
+        
+        Args:
+            path (str): Path to the JSON file
+            
+        Returns:
+            Dict: Parsed JSON content
+            
+        Raises:
+            FileNotFoundError: If file doesn't exist
+            JSONDecodeError: If content is not valid JSON
+        """
+        try:
+            self.logger.info(f"Reading JSON from: {path}")
+            
+            if self.storage_type == 'gcs':
+                blob = self.bucket.blob(path)
+                if not blob.exists():
+                    raise FileNotFoundError(f"Blob does not exist: {path}")
+                content = blob.download_as_text()
+            else:
+                full_path = os.path.join(self.base_path, path)
+                if not os.path.exists(full_path):
+                    raise FileNotFoundError(f"File does not exist: {full_path}")
+                with open(full_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    
+            return json.loads(content)
+            
+        except Exception as e:
+            self.logger.error(f"Error reading JSON from {path}: {str(e)}")
+            raise
+
+    def get_file_path(self, relative_path: str) -> str:
+        """
+        Generate complete file path based on storage type.
+        
+        Args:
+            relative_path (str): Relative path to the file
+            
+        Returns:
+            str: Complete file path with appropriate prefix
+        """
+        if self.storage_type == 'gcs':
+            return f"gs://{self.base_path}/{relative_path}"
+        return os.path.join(self.base_path, relative_path)
+
     def count_words(self, text: str) -> int:
         """
         Count words in a text string.
@@ -401,159 +452,36 @@ class TranscriptProcessor:
             
         Returns:
             int: Number of words in the text
-            
-        Note:
-            Words are defined as sequences of word characters (\w+)
         """
         return len(re.findall(r'\w+', text))
-    
-    def read_json_from_gcs(self, blob_path: str) -> Dict:
-        """
-        Read JSON file from Google Cloud Storage.
-        
-        Args:
-            blob_path (str): Path to the JSON blob in GCS
-            
-        Returns:
-            Dict: Parsed JSON content
-            
-        Raises:
-            FileNotFoundError: If blob doesn't exist
-            JSONDecodeError: If content is not valid JSON
-        """
-        try:
-            self.logger.info(f"Reading JSON from: {blob_path}")
-            blob = self.bucket.blob(blob_path)
-            
-            if not blob.exists():
-                raise FileNotFoundError(f"Blob does not exist: {blob_path}")
-                
-            content = blob.download_as_text()
-            return json.loads(content)
-        except Exception as e:
-            self.logger.error(f"Error reading JSON from {blob_path}: {str(e)}")
-            raise
-
-    def check_video_corruption(self, clip_path: str) -> Tuple[bool, str]:
-        """
-        Check if a video clip is corrupted by examining its video streams using ffprobe.
-        
-        Args:
-            clip_path (str): GCS path to the video clip
-            
-        Returns:
-            Tuple[bool, str]: 
-                - First element: True if corrupted/audio-only, False if valid video
-                - Second element: Description of the issue if corrupted
-                
-        Raises:
-            subprocess.SubprocessError: If ffprobe command fails
-            JSONDecodeError: If ffprobe output cannot be parsed
-        """
-        try:
-            clean_path = clip_path.replace(f"gs://{self.bucket_name}/", "")
-            blob = self.bucket.blob(clean_path)
-            
-            if not blob.exists():
-                return False, "File not found"
-            
-            # Create a temporary file in our tmp directory
-            temp_file_path = self.temp_dir / f"temp_clip_{hash(clip_path)}.mp4"
-            self.logger.debug(f"Downloading clip to temporary file: {temp_file_path}")
-            
-            blob.download_to_filename(str(temp_file_path))
-            
-            # Use ffprobe to get stream information
-            ffprobe_cmd = [
-                'ffprobe',
-                '-v', 'quiet',
-                '-print_format', 'json',
-                '-show_streams',
-                '-show_format',
-                str(temp_file_path)
-            ]
-            
-            result = subprocess.run(ffprobe_cmd, capture_output=True, text=True)
-            
-            # Clean up the temporary file
-            temp_file_path.unlink()
-            
-            if result.returncode != 0:
-                self.logger.error(f"FFprobe error for {clip_path}: {result.stderr}")
-                return True, f"FFprobe error: {result.stderr}"
-            
-            try:
-                probe_data = json.loads(result.stdout)
-            except json.JSONDecodeError:
-                self.logger.error(f"Failed to parse FFprobe output for {clip_path}")
-                return True, "Failed to parse FFprobe output"
-            
-            # Check for presence of streams
-            streams = probe_data.get('streams', [])
-            has_video = False
-            has_audio = False
-            video_info = {}
-            
-            for stream in streams:
-                codec_type = stream.get('codec_type')
-                if codec_type == 'video':
-                    has_video = True
-                    video_info = {
-                        'fps': stream.get('r_frame_rate', 'N/A'),
-                        'width': stream.get('width', 0),
-                        'height': stream.get('height', 0),
-                        'codec': stream.get('codec_name', 'unknown')
-                    }
-                elif codec_type == 'audio':
-                    has_audio = True
-            
-            # Check corruption scenarios
-            if not has_video:
-                return True, "No video stream found (audio-only file)"
-            
-            if not has_audio:
-                return True, "No audio stream found (video-only file)"
-            
-            if video_info.get('width', 0) <= 0 or video_info.get('height', 0) <= 0:
-                return True, "Invalid video dimensions"
-            
-            # Check framerate
-            fps_str = video_info.get('fps', '0/1')
-            try:
-                num, den = map(int, fps_str.split('/'))
-                fps = num / den if den != 0 else 0
-                if fps <= 0:
-                    return True, f"Invalid framerate: {fps_str}"
-            except (ValueError, ZeroDivisionError):
-                return True, f"Could not parse framerate: {fps_str}"
-            
-            return False, "Valid video file"
-            
-        except Exception as e:
-            self.logger.error(f"Error checking video corruption for {clip_path}: {str(e)}")
-            return True, f"Error checking video: {str(e)}"
 
     def list_playlists(self) -> List[str]:
         """
-        List all playlist folders in GCS bucket using blob path analysis.
+        List all playlist folders in storage.
         
         Returns:
             List[str]: List of unique playlist prefixes
             
         Raises:
-            google.cloud.exceptions.NotFound: If bucket doesn't exist
-            google.api_core.exceptions.GoogleAPIError: For GCS API errors
+            google.cloud.exceptions.NotFound: If bucket doesn't exist (GCS)
+            OSError: If base directory is not accessible (local)
         """
         try:
             self.logger.info("Listing playlists...")
-            all_blobs = list(self.bucket.list_blobs())
-            self.logger.info(f"Total blobs found: {len(all_blobs)}")
             
-            playlists = {
-                blob.name.split('/')[0] 
-                for blob in all_blobs 
-                if blob.name.startswith('playlist_')
-            }
+            if self.storage_type == 'gcs':
+                all_blobs = list(self.bucket.list_blobs())
+                playlists = {
+                    blob.name.split('/')[0] 
+                    for blob in all_blobs 
+                    if blob.name.startswith('playlist_')
+                }
+            else:
+                playlists = {
+                    d for d in os.listdir(self.base_path)
+                    if os.path.isdir(os.path.join(self.base_path, d))
+                    and d.startswith('playlist_')
+                }
             
             playlist_list = sorted(list(playlists))
             self.logger.info(f"Found playlists: {playlist_list}")
@@ -565,38 +493,39 @@ class TranscriptProcessor:
 
     def list_videos(self, playlist_prefix: str) -> List[str]:
         """
-        List all video folders in a playlist that match the 'video_X' pattern.
+        List all video folders in a playlist.
         
         Args:
-            playlist_prefix (str): The playlist prefix to search within (e.g., 'playlist_1')
+            playlist_prefix (str): The playlist prefix to search within
             
         Returns:
             List[str]: List of video folder paths matching the pattern
             
         Raises:
-            google.cloud.exceptions.NotFound: If playlist doesn't exist
-            google.api_core.exceptions.GoogleAPIError: For GCS API errors
-            
-        Note:
-            Only looks for folders matching pattern 'video_X' where X is a number,
-            ignoring any other files or folders in the playlist directory.
+            FileNotFoundError: If playlist directory doesn't exist
         """
         try:
             self.logger.info(f"Listing videos in playlist: {playlist_prefix}")
+            video_pattern = re.compile(r'video_\d+')
             
-            # List all blobs with the playlist prefix
-            blobs = list(self.bucket.list_blobs(prefix=f"{playlist_prefix}/"))
-            
-            # Extract unique video folder paths using regex pattern
-            videos = set()
-            video_pattern = re.compile(rf"{playlist_prefix}/video_\d+/")
-            
-            for blob in blobs:
-                match = video_pattern.match(blob.name)
-                if match:
-                    # Get the path without trailing slash
-                    video_path = match.group(0).rstrip('/')
-                    videos.add(video_path)
+            if self.storage_type == 'gcs':
+                blobs = list(self.bucket.list_blobs(prefix=f"{playlist_prefix}/"))
+                videos = set()
+                for blob in blobs:
+                    parts = blob.name.split('/')
+                    if len(parts) > 1 and video_pattern.match(parts[1]):
+                        videos.add(f"{playlist_prefix}/{parts[1]}")
+            else:
+                playlist_path = os.path.join(self.base_path, playlist_prefix)
+                if not os.path.exists(playlist_path):
+                    raise FileNotFoundError(f"Playlist directory not found: {playlist_path}")
+                    
+                videos = {
+                    f"{playlist_prefix}/{d}"
+                    for d in os.listdir(playlist_path)
+                    if os.path.isdir(os.path.join(playlist_path, d))
+                    and video_pattern.match(d)
+                }
             
             video_list = sorted(list(videos), key=lambda x: int(x.split('_')[-1]))
             self.logger.info(f"Found videos: {video_list}")
@@ -605,6 +534,191 @@ class TranscriptProcessor:
         except Exception as e:
             self.logger.error(f"Error listing videos in {playlist_prefix}: {str(e)}")
             raise
+
+    def _get_clip_file_path(self, clip_path: str) -> Tuple[Path, bool]:
+        """
+        Get the file path for clip checking, handling both storage types.
+        
+        Args:
+            clip_path (str): Original clip path
+            
+        Returns:
+            Tuple[Path, bool]: (file path, is_temporary)
+            
+        Raises:
+            FileNotFoundError: If clip file doesn't exist
+        """
+        if self.storage_type == 'gcs':
+            clean_path = clip_path.replace(f"gs://{self.base_path}/", "")
+            blob = self.bucket.blob(clean_path)
+            if not blob.exists():
+                raise FileNotFoundError(self.file_not_found_error)
+            temp_file_path = self.temp_dir / f"temp_clip_{hash(clip_path)}.mp4"
+            blob.download_to_filename(str(temp_file_path))
+            return temp_file_path, True
+        
+        if not os.path.exists(clip_path):
+            raise FileNotFoundError(self.file_not_found_error)
+        return Path(clip_path), False
+
+    def _validate_probe_data(self, probe_data: Dict) -> Tuple[bool, str]:
+        """
+        Validate video probe data for corruption.
+        
+        Args:
+            probe_data (Dict): FFprobe output data
+            
+        Returns:
+            Tuple[bool, str]: (is_corrupted, error_message)
+        """
+        streams = probe_data.get('streams', [])
+        stream_info = self._analyze_streams(streams)
+        
+        if not stream_info['has_video']:
+            return True, "No video stream found"
+            
+        if not stream_info['has_audio']:
+            return True, "No audio stream found"
+            
+        if not self._check_video_dimensions(stream_info['video_info']):
+            return True, "Invalid video dimensions"
+            
+        fps_validation = self._validate_framerate(stream_info['video_info'].get('fps', '0/1'))
+        if fps_validation[0]:  # has error
+            return True, fps_validation[1]
+        
+        return False, "Valid video file"
+
+    def _analyze_streams(self, streams: List[Dict]) -> Dict:
+        """
+        Analyze video and audio streams from probe data.
+        
+        Args:
+            streams (List[Dict]): List of stream data from FFprobe
+            
+        Returns:
+            Dict: Stream analysis results
+        """
+        result = {
+            'has_video': False,
+            'has_audio': False,
+            'video_info': {}
+        }
+        
+        for stream in streams:
+            codec_type = stream.get('codec_type')
+            if codec_type == 'video':
+                result['has_video'] = True
+                result['video_info'] = {
+                    'fps': stream.get('r_frame_rate', 'N/A'),
+                    'width': stream.get('width', 0),
+                    'height': stream.get('height', 0),
+                    'codec': stream.get('codec_name', 'unknown')
+                }
+            elif codec_type == 'audio':
+                result['has_audio'] = True
+        
+        return result
+
+    def _check_video_dimensions(self, video_info: Dict) -> bool:
+        """
+        Check if video dimensions are valid.
+        
+        Args:
+            video_info (Dict): Video stream information
+            
+        Returns:
+            bool: True if dimensions are valid
+        """
+        width = video_info.get('width', 0)
+        height = video_info.get('height', 0)
+        return width > 0 and height > 0
+
+    def _validate_framerate(self, fps_str: str) -> Tuple[bool, str]:
+        """
+        Validate video framerate.
+        
+        Args:
+            fps_str (str): Framerate string in format 'num/den'
+            
+        Returns:
+            Tuple[bool, str]: (has_error, error_message)
+        """
+        try:
+            num, den = map(int, fps_str.split('/'))
+            fps = num / den if den != 0 else 0
+            if fps <= 0:
+                return True, f"Invalid framerate: {fps_str}"
+            return False, ""
+        except (ValueError, ZeroDivisionError):
+            return True, f"Could not parse framerate: {fps_str}"
+
+    def check_video_corruption(self, clip_path: str) -> Tuple[bool, str]:
+        """
+        Check if a video clip is corrupted using ffprobe.
+        
+        Args:
+            clip_path (str): Path to the video clip
+            
+        Returns:
+            Tuple[bool, str]: 
+                - First element: True if corrupted, False if valid
+                - Second element: Description of corruption if present
+        """
+        try:
+            # Get file path and handle temporary file if needed
+            temp_file_path, is_temporary = self._get_clip_file_path(clip_path)
+            
+            try:
+                # Run ffprobe
+                ffprobe_cmd = [
+                    'ffprobe',
+                    '-v', 'quiet',
+                    '-print_format', 'json',
+                    '-show_streams',
+                    '-show_format',
+                    str(temp_file_path)
+                ]
+                
+                result = subprocess.run(ffprobe_cmd, capture_output=True, text=True)
+                
+                if result.returncode != 0:
+                    return True, f"FFprobe error: {result.stderr}"
+                
+                probe_data = json.loads(result.stdout)
+                return self._validate_probe_data(probe_data)
+                
+            finally:
+                # Clean up temporary file if using GCS
+                if is_temporary:
+                    temp_file_path.unlink()
+                    
+        except FileNotFoundError:
+            return False, self.file_not_found_error
+        except json.JSONDecodeError:
+            return True, "Failed to parse FFprobe output"
+        except Exception as e:
+            self.logger.error(f"Error checking video corruption for {clip_path}: {str(e)}")
+            return True, f"Error checking video: {str(e)}"
+
+
+    def _generate_clip_path(self, transcript_path: str, iterator: str) -> str:
+        """
+        Generate the storage path for a clip.
+        
+        Args:
+            transcript_path (str): Path to the transcript JSON file
+            iterator (str): Formatted string representing clip number
+            
+        Returns:
+            str: Complete path to the clip file
+        """
+        clips_dir = os.path.dirname(transcript_path)
+        clip_name = f"clips/clip_{iterator}.mp4"
+        
+        if self.storage_type == 'gcs':
+            return f"gs://{self.base_path}/{clips_dir}/{clip_name}"
+        return os.path.join(self.base_path, clips_dir, clip_name)
 
     def _determine_role(self, speaker: str) -> str:
         """
@@ -626,9 +740,6 @@ class TranscriptProcessor:
             role (str): The role of the speaker ('therapist' or 'client')
             text (str): The transcript text to analyze
             video_id (str): Identifier for the current video
-            
-        Note:
-            Updates class statistics for word counts and conversation turns
         """
         word_count = self.count_words(text)
         if role == "therapist":
@@ -667,48 +778,6 @@ class TranscriptProcessor:
                 
         return is_short
 
-    def _generate_clip_path(self, gcs_transcript_path: str, iterator: str) -> str:
-        """
-        Generate the Google Cloud Storage path for a clip.
-        
-        Args:
-            gcs_transcript_path (str): Path to the transcript JSON file
-            iterator (str): Formatted string representing clip number (e.g., '001')
-            
-        Returns:
-            str: Complete GCS path to the clip file
-            
-        Note:
-            Returns path in format: 'gs://bucket-name/path/to/clips/clip_XXX.mp4'
-        """
-        clips_dir = os.path.dirname(gcs_transcript_path)
-        clip_path = f"{self.bucket_name}/{clips_dir}/clips/clip_{iterator}.mp4"
-        return "gs://" + clip_path.replace('//', '/')
-
-    def _handle_corruption_check(self, clip_path: str) -> Tuple[str, str]:
-        """
-        Check if a clip is corrupted and update corruption statistics.
-        
-        Args:
-            clip_path (str): GCS path to the clip file
-            
-        Returns:
-            Tuple[str, str]: 
-                - First element: 'Yes' if corrupted, 'No' if not
-                - Second element: Error message describing the corruption (empty if not corrupted)
-            
-        Note:
-            Updates class statistics for corrupted clips and corruption reasons
-        """
-        is_corrupted, error_message = self.check_video_corruption(clip_path)
-        
-        if is_corrupted:
-            self.statistics.num_corrupted_clips += 1
-            self.statistics.corruption_reasons[error_message] += 1
-            self.logger.warning(f"Corrupted clip {clip_path}: {error_message}")
-            
-        return ("Yes" if is_corrupted else "No", error_message)
-
     def _create_processed_entry(self, entry: Dict[str, Any], role: str, clip_path: str, 
                               is_short: str, corrupted: str, corruption_reason: str, 
                               transcript_entries: List[Dict[str, Any]], idx: int) -> Dict[str, Any]:
@@ -718,7 +787,7 @@ class TranscriptProcessor:
         Args:
             entry (Dict[str, Any]): Original transcript entry
             role (str): Speaker role ('therapist' or 'client')
-            clip_path (str): GCS path to the clip file
+            clip_path (str): Path to the clip file
             is_short (str): 'Yes' if clip is short, 'No' otherwise
             corrupted (str): 'Yes' if clip is corrupted, 'No' otherwise
             corruption_reason (str): Description of corruption if present
@@ -727,7 +796,6 @@ class TranscriptProcessor:
             
         Returns:
             Dict[str, Any]: Processed entry containing all relevant clip information
-            including path, role, transcripts, analysis flags, and corruption status
         """
         return {
             "path": clip_path,
@@ -742,37 +810,7 @@ class TranscriptProcessor:
             "analysis": "NA" if (is_short == "Yes" or role == "therapist" or corrupted == "Yes") else ""
         }
 
-    def process_transcript_file(self, gcs_transcript_path: str, video_id: str) -> List[Dict[str, Any]]:
-        """Process a single transcript file from GCS"""
-        self.logger.info(f"Processing transcript: {gcs_transcript_path}")
-        transcript_entries = self.read_json_from_gcs(gcs_transcript_path)
-        processed_data = []
-        
-        for idx, entry in enumerate(transcript_entries):
-            # Process entry
-            role = self._determine_role(entry["speaker"])
-            iterator = f"{idx + 1:03d}"
-            
-            # Process clip
-            clip_path = self._generate_clip_path(gcs_transcript_path, iterator)
-            corrupted, corruption_reason = self._handle_corruption_check(clip_path)
-            
-            # Update statistics with corruption information
-            is_short = self._update_duration_statistics(entry["end"] - entry["start"], corrupted == "Yes")
-            self._update_conversation_statistics(role, entry["text"], video_id)
-            
-            # Create and store processed entry
-            processed_entry = self._create_processed_entry(
-                entry, role, clip_path, is_short, corrupted, 
-                corruption_reason, transcript_entries, idx
-            )
-            processed_data.append(processed_entry)
-            
-        self.logger.info(f"Processed {len(processed_data)} entries from transcript")
-        return processed_data
-
-    def build_previous_transcript(self, 
-                                transcript_entries: List[Dict[Any, Any]], 
+    def build_previous_transcript(self, transcript_entries: List[Dict[str, Any]], 
                                 current_index: int) -> str:
         """
         Build previous transcript string from transcript entries.
@@ -794,21 +832,82 @@ class TranscriptProcessor:
             
         return "\n".join(previous_dialogues)
 
+    def process_transcript_file(self, gcs_transcript_path: str, video_id: str) -> List[Dict[str, Any]]:
+        """
+        Process a single transcript file.
+        
+        Args:
+            gcs_transcript_path (str): Path to the transcript file
+            video_id (str): Identifier for the video being processed
+            
+        Returns:
+            List[Dict[str, Any]]: List of processed transcript entries
+            
+        Raises:
+            FileNotFoundError: If transcript file doesn't exist
+            JSONDecodeError: If transcript file is not valid JSON
+        """
+        self.logger.info(f"Processing transcript: {gcs_transcript_path}")
+        transcript_entries = self.read_json_from_storage(gcs_transcript_path)
+        processed_data = []
+        
+        for idx, entry in enumerate(transcript_entries):
+            # Process entry and determine role
+            role = self._determine_role(entry["speaker"])
+            iterator = f"{idx + 1:03d}"
+            
+            # Generate clip path and check for corruption
+            clip_path = self._generate_clip_path(gcs_transcript_path, iterator)
+            corrupted, corruption_reason = self._handle_corruption_check(clip_path)
+            
+            # Update statistics
+            is_short = self._update_duration_statistics(entry["end"] - entry["start"], 
+                                                      corrupted == "Yes")
+            self._update_conversation_statistics(role, entry["text"], video_id)
+            
+            # Create and store processed entry
+            processed_entry = self._create_processed_entry(
+                entry, role, clip_path, is_short, corrupted, 
+                corruption_reason, transcript_entries, idx
+            )
+            processed_data.append(processed_entry)
+            
+        self.logger.info(f"Processed {len(processed_data)} entries from transcript")
+        return processed_data
+
+    def _handle_corruption_check(self, clip_path: str) -> Tuple[str, str]:
+        """
+        Check if a clip is corrupted and update corruption statistics.
+        
+        Args:
+            clip_path (str): Path to the clip file
+            
+        Returns:
+            Tuple[str, str]: 
+                - First element: 'Yes' if corrupted, 'No' if not
+                - Second element: Error message describing the corruption
+        """
+        is_corrupted, error_message = self.check_video_corruption(clip_path)
+        
+        if is_corrupted:
+            self.statistics.num_corrupted_clips += 1
+            self.statistics.corruption_reasons[error_message] += 1
+            self.logger.warning(f"Corrupted clip {clip_path}: {error_message}")
+            
+        return ("Yes" if is_corrupted else "No", error_message)
+
     def process_all_transcripts(self) -> List[Dict[str, Any]]:
         """
         Process all transcripts in all playlists and videos.
+        
+        This method processes all transcripts in the storage location, updating statistics
+        and returning a list of processed entries.
         
         Returns:
             List[Dict[str, Any]]: List of all processed transcript entries
             
         Raises:
-            google.cloud.exceptions.NotFound: If bucket doesn't exist
-            google.api_core.exceptions.GoogleAPIError: For GCS API errors
-            
-        Note:
-            This method processes all transcripts in the bucket, updating statistics
-            and returning a list of processed entries. It handles errors for individual
-            transcripts while continuing to process others.
+            Exception: If there are errors accessing storage or processing transcripts
         """
         all_processed_data = []
         
@@ -816,7 +915,7 @@ class TranscriptProcessor:
         self.logger.info("Starting to process all transcripts")
         playlist_prefixes = self.list_playlists()
         if not playlist_prefixes:
-            self.logger.warning("No playlists found in bucket!")
+            self.logger.warning("No playlists found!")
             return all_processed_data
             
         self.statistics.num_playlists = len(playlist_prefixes)
@@ -858,14 +957,6 @@ class TranscriptProcessor:
             
         Raises:
             IOError: If there's an error creating the output directory or writing the file
-            google.cloud.exceptions.NotFound: If bucket doesn't exist
-            google.api_core.exceptions.GoogleAPIError: For GCS API errors
-            
-        Note:
-            This method processes all transcripts, generates statistics, and saves
-            the results to a JSON file. If the output directory doesn't exist,
-            it will be created. The method also ensures proper JSON formatting
-            and UTF-8 encoding.
         """
         if not output_path.endswith('.json'):
             output_path = f"{output_path}.json"

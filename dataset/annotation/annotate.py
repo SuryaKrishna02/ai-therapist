@@ -4,10 +4,17 @@ import logging
 import asyncio
 import vertexai
 import colorlog
+import sys
+import torch
+import transformers
 from typing import Dict, Optional
 from google.api_core import exceptions
 from ratelimit import limits, sleep_and_retry
 from vertexai.generative_models import GenerativeModel, Part
+sys.path.append('./././')
+from videollama2 import model_init, mm_infer
+
+# Import existing constants
 from constants import (
     SAFETY_CONFIG,
     GENERATION_CONFIG,
@@ -35,19 +42,24 @@ class ModelError(Exception):
 class TranscriptAnnotator:
     """Class for annotating therapy session transcripts using various models"""
     
-    def __init__(self, model_name: str = "gemini-1.5-flash-002"):
+    def __init__(self, use_local: bool = False, model_name: str = "gemini-1.5-flash-002"):
         """
         Initialize the TranscriptAnnotator
         
         Args:
-            model_name (str): Name of the generative model to use
-            calls_per_minute (int): Rate limit for API calls
-            max_retries (int): Maximum number of retries for failed calls
+            use_local (bool): Whether to use local LLMs instead of Gemini API
+            model_name (str): Name of the generative model to use for Gemini
         """
-        vertexai.init(project=PROJECT_ID, location=LOCATION)
+        self.use_local = use_local
         self.model_name = model_name
         self.setup_logger()
         
+        if not use_local:
+            vertexai.init(project=PROJECT_ID, location=LOCATION)
+        else:
+            # Initialize local models
+            self._init_local_models()
+
     def setup_logger(self):
         """Configure colored logging"""
         handler = colorlog.StreamHandler()
@@ -65,38 +77,99 @@ class TranscriptAnnotator:
 
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.INFO)
-        self.logger.addHandler(handler)
+        
         # Remove any existing handlers to avoid duplicate logs
-        for existing_handler in self.logger.handlers[:-1]:
+        for existing_handler in self.logger.handlers[:]:
             self.logger.removeHandler(existing_handler)
+            
+        self.logger.addHandler(handler)
 
-    def extract_json_field(self, response_text: str, field: str) -> str:
+    def _init_local_models(self):
+        """Initialize local LLaMA and VideoLLaMA models"""
+        try:
+            # Initialize LLaMA model for text
+            self.logger.info("Initializing LLaMA model...")
+            model_id = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+            self.llama_pipeline = transformers.pipeline(
+                "text-generation",
+                model=model_id,
+                model_kwargs={"torch_dtype": torch.bfloat16},
+                device_map="auto",
+            )
+            
+            # Initialize VideoLLaMA model
+            self.logger.info("Initializing VideoLLaMA model...")
+            model_path = "DAMO-NLP-SG/VideoLLaMA2.1-7B-AV"
+            self.video_model, self.processor, self.tokenizer = model_init(model_path)
+            
+        except Exception as e:
+            self.logger.error(f"Error initializing local models: {str(e)}")
+            raise
+
+    async def _call_local_llama(self, system_instruction: str, prompt: str) -> str:
         """
-        Extract specific field from JSON response text
+        Call local LLaMA model for text processing with concatenated prompt
         
         Args:
-            response_text (str): Response text containing JSON
-            field (str): Field to extract from JSON
+            system_instruction (str): System instruction for the model
+            prompt (str): User prompt
             
         Returns:
-            str: Extracted field value
-            
-        Raises:
-            json.JSONDecodeError: If JSON parsing fails
-            KeyError: If field not found in JSON
+            str: Model response text
         """
         try:
-            start_idx = response_text.find('{')
-            end_idx = response_text.rfind('}') + 1
-            if start_idx == -1 or end_idx == 0:
-                raise json.JSONDecodeError("No JSON found in response", response_text, 0)
-                
-            json_str = response_text[start_idx:end_idx]
-            response_dict = json.loads(json_str)
-            return response_dict[field]
-        except (json.JSONDecodeError, KeyError) as e:
-            self.logger.error(f"Error extracting field '{field}' from response: {str(e)}")
-            raise
+            # Concatenate system instruction and prompt with newline
+            combined_prompt = f"{system_instruction}\n{prompt}"
+            
+            outputs = self.llama_pipeline(
+                combined_prompt,
+                max_new_tokens=1024,
+                do_sample=True,
+                temperature=0.7,
+                top_p=0.95,
+            )
+            
+            # Extract the generated response
+            full_response = outputs[0]['generated_text'][-1]['content']
+            # Return only the newly generated text (after the prompt)
+            response = full_response[len(combined_prompt):].strip()
+            return response
+            
+        except Exception as e:
+            self.logger.error(f"Error calling local LLaMA: {str(e)}")
+            raise ModelError(f"LLaMA inference failed: {str(e)}")
+
+    async def _call_local_videollama(self, video_path: str, prompt: str) -> str:
+        """
+        Call local VideoLLaMA model for video processing
+        
+        Args:
+            video_path (str): Path to video file
+            prompt (str): Question/prompt for the model
+            
+        Returns:
+            str: Model response text
+        """
+        try:
+            # Preprocess video
+            preprocess = self.processor["video"]
+            video_tensor = preprocess(video_path, va=True)
+            
+            # Run inference
+            output = mm_infer(
+                video_tensor,
+                prompt,
+                model=self.video_model,
+                tokenizer=self.tokenizer,
+                modal="video",
+                do_sample=False,
+            )
+            
+            return output
+            
+        except Exception as e:
+            self.logger.error(f"Error calling VideoLLaMA: {str(e)}")
+            raise ModelError(f"VideoLLaMA inference failed: {str(e)}")
 
     @sleep_and_retry
     @limits(calls=CALLS_PER_MINUTE, period=60)
@@ -105,12 +178,12 @@ class TranscriptAnnotator:
         (exceptions.ServiceUnavailable, exceptions.InternalServerError),
         max_tries=MAX_RETRIES
     )
-    async def call_model(self, 
-                        system_instruction: str,
-                        prompt: str,
-                        video_path: Optional[str] = None) -> str:
+    async def _call_gemini(self, 
+                          system_instruction: str,
+                          prompt: str,
+                          video_path: Optional[str] = None) -> str:
         """
-        Call the generative model with rate limiting and retries
+        Call Gemini API with retries and rate limiting
         
         Args:
             system_instruction (str): System instruction for the model
@@ -144,20 +217,64 @@ class TranscriptAnnotator:
             return response.text
 
         except exceptions.InvalidArgument as e:
-            # Handle 400 Bad Request errors
             self.logger.error(f"Bad request for video {video_path}: {str(e)}")
             with open('corrupted_files.txt', 'a') as f:
                 f.write(f"{video_path}\n")
             raise
 
         except (exceptions.ServiceUnavailable, exceptions.InternalServerError) as e:
-            # Handle 5xx server errors that should be retried
             self.logger.warning(f"Server error, retrying: {str(e)}")
             raise
 
         except exceptions.GoogleAPICallError as e:
-            # Handle other API errors
             self.logger.error(f"API error for video {video_path}: {str(e)}")
+            raise
+
+    async def call_model(self, 
+                        system_instruction: str,
+                        prompt: str,
+                        video_path: Optional[str] = None) -> str:
+        """
+        Call appropriate model based on initialization flag
+        
+        Args:
+            system_instruction (str): System instruction for the model
+            prompt (str): Prompt template filled with data
+            video_path (Optional[str]): Path to video file if needed
+            
+        Returns:
+            str: Model response text
+        """
+        if self.use_local:
+            if video_path:
+                return await self._call_local_videollama(video_path, prompt)
+            else:
+                return await self._call_local_llama(system_instruction, prompt)
+        else:
+            return await self._call_gemini(system_instruction, prompt, video_path)
+
+    def extract_json_field(self, response_text: str, field: str) -> str:
+        """
+        Extract specific field from JSON response text
+        
+        Args:
+            response_text (str): Response text containing JSON
+            field (str): Field to extract from JSON
+            
+        Returns:
+            str: Extracted field value
+        """
+        try:
+            start_idx = response_text.find('{')
+            end_idx = response_text.rfind('}') + 1
+            if start_idx == -1 or end_idx == 0:
+                raise json.JSONDecodeError("No JSON found in response", response_text, 0)
+                
+            json_str = response_text[start_idx:end_idx]
+            response_dict = json.loads(json_str)
+            return response_dict[field]
+        except (json.JSONDecodeError, KeyError) as e:
+            self.logger.error(f"Error extracting field '{field}' from response: {str(e)}")
             raise
 
     async def process_entry(self, entry: Dict) -> Dict:
