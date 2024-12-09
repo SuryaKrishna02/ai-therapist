@@ -31,3 +31,10 @@ try:
 
 except Exception as e:
     print(f"Error annotating videos: {str(e)}")
+
+finally:
+    # Clean up resources if needed
+    if hasattr(annotator, '_cleanup_llama_model'):
+        annotator._cleanup_llama_model()
+    if hasattr(annotator, '_cleanup_videollama_model'):
+        annotator._cleanup_videollama_model()
