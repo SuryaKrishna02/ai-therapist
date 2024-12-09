@@ -1,3 +1,11 @@
+# !pip install torch datasets transformers trl git+https://github.com/unslothai/unsloth.git
+
+# !pip install bitsandbytes triton
+
+# !pip install unsloth-zoo
+
+# !pip install xformers>=0.0.27
+
 --extra-index-url https://download.pytorch.org/whl/cu118
 
 tqdm==4.67.1
