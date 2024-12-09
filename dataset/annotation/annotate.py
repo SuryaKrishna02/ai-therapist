@@ -287,8 +287,8 @@ class TranscriptAnnotator:
             return response
             
         except Exception as e:
-            self.logger.error(f"Error calling local LLaMA: {str(e)}")
-            raise ModelError(f"LLaMA inference failed: {str(e)}")
+            self.logger.warning(f"Unable to call Local LLaMA: {str(e)}")
+            return " "
 
     async def _call_local_videollama(self, video_path: str, system_instruction: str, prompt: str) -> str:
         """
@@ -323,8 +323,8 @@ class TranscriptAnnotator:
             return output
             
         except Exception as e:
-            self.logger.error(f"Error calling VideoLLaMA: {str(e)}")
-            return ""
+            self.logger.warning(f"Unable to call VideoLLaMA: {str(e)}")
+            return " "
 
     @sleep_and_retry
     @limits(calls=CALLS_PER_MINUTE, period=60)
@@ -797,13 +797,11 @@ class TranscriptAnnotator:
                     await asyncio.gather(*[self._process_text_item(item) for item in text_items])
                     self._cleanup_llama_model()
 
-                # Process video items sequentially with VideoLLaMA
+                # Process video items with VideoLLaMA
                 if video_items:
                     self.logger.info("Processing video items with VideoLLaMA sequentially...")
                     self._init_videollama_model()
-                    for item in video_items:
-                        self.logger.debug(f"Processing video item: {item.video_path}")
-                        await self._process_video_item_sequential(item)
+                    await asyncio.gather(*[self._process_video_item(item) for item in video_items])
                     self._cleanup_videollama_model()
                 
             else:
