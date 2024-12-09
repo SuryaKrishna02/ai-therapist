@@ -17,6 +17,7 @@ into one of the following seven categories:
 7. fear
 
 Note: Always focus on the person who is speaking to classify the emotion.
+Note: Don't give the extra reasoning other than the below expected output format.
 Note: The output format should be in the json format with `emotion` as key field without numbers in it.
 Output Format:
 ```json
@@ -43,6 +44,7 @@ dynamically classify the emotion into one of the following seven categories:
 
 Note: Based on whether therapist or client is speaking, decide on the emotion appropriately \
 as therapist is most of time in neutral emotion.
+Note: Don't give the extra reasoning other than the below expected output format.
 Note: The output format should be in the json format with `emotion` as key field without numbers in it.
 Output Format:
 ```json
@@ -57,6 +59,7 @@ You are an experienced psychologist who is expert in extracting \
 emotion-related cues from the video of the person speaking.
 
 Note: Always focus on the person who is speaking to classify the emotion.
+Note: Don't give the extra reasoning other than the below expected output format.
 Note: The output format should be in the json format with `emotional_cues`.
 Output Format:
 ```json
@@ -90,6 +93,7 @@ The following are the ten therapeutic strategies that you might take:
 10. Others
 
 Note: Ponder for while about the conversation that happened until now to decide on the strategy.
+Note: Don't give the extra reasoning other than the below expected output format.
 Note: The output format should be in the json format with `strategy` as key field without numbers in it.
 Output Format:
 ```json

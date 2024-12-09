@@ -588,13 +588,13 @@ class TranscriptAnnotator:
             # Emotion detection
             prompt = TEXT_EMOTION_TEMPLATE.format(role=item.role, dialogue=item.dialogue)
             response = await self._call_local_llama(TEXT_EMOTION_DETECTION, prompt)
-            item.entry["emotion"] = self.extract_json_field(response, "emotion")
+            item.entry["emotion"] = self.extract_json_field(response, "emotion", item.path)
             
             # Strategy prediction for therapist
             if item.role == "therapist":
                 prompt = STRATEGY_TEMPLATE.format(context=item.context)
                 response = await self._call_local_llama(TEXT_STRATEGY, prompt)
-                item.entry["strategy"] = self.extract_json_field(response, "strategy")
+                item.entry["strategy"] = self.extract_json_field(response, "strategy", item.path)
                 
         except Exception as e:
             self.logger.error(f"Error processing text item: {str(e)}")
@@ -621,7 +621,7 @@ class TranscriptAnnotator:
                 VIDEO_TEXT_EMOTION_DETECTION, 
                 prompt
             )
-            item.entry["emotion"] = self.extract_json_field(response, "emotion")
+            item.entry["emotion"] = self.extract_json_field(response, "emotion", item.path)
             
             if item.role == "client":
                 # Analysis for client
@@ -630,7 +630,7 @@ class TranscriptAnnotator:
                     VIDEO_TEXT_EMOTION_ANALYSIS,
                     VIDEO_TEXT_ANALYSIS_TEMPLATE
                 )
-                item.entry["analysis"] = self.extract_json_field(response, "emotional_cues")
+                item.entry["analysis"] = self.extract_json_field(response, "emotional_cues", item.path)
             else:
                 # Strategy prediction for therapist
                 prompt = STRATEGY_TEMPLATE.format(context=item.context)
@@ -639,10 +639,57 @@ class TranscriptAnnotator:
                     VIDEO_TEXT_STRATEGY,
                     prompt
                 )
-                item.entry["strategy"] = self.extract_json_field(response, "strategy")
+                item.entry["strategy"] = self.extract_json_field(response, "strategy", item.path)
                 
         except Exception as e:
             self.logger.error(f"Error processing video item: {str(e)}")
+
+    async def _process_video_item_sequential(self, item: VideoProcessingItem) -> None:
+        """
+        Process a video item using VideoLLaMA model sequentially.
+        
+        Handles emotion detection and analysis for all roles, plus strategy
+        prediction for therapist roles using video-text processing. Each
+        VideoLLaMA call is made sequentially to prevent memory issues.
+        
+        Args:
+            item (VideoProcessingItem): Item containing video to process
+            
+        Note:
+            Updates the original entry in place with processing results.
+            This method processes each VideoLLaMA call one at a time to
+            ensure stable memory usage.
+        """
+        try:
+            # Emotion detection
+            prompt = VIDEO_TEXT_EMOTION_TEMPLATE.format(dialogue=item.dialogue)
+            response = await self._call_local_videollama(
+                item.video_path, 
+                VIDEO_TEXT_EMOTION_DETECTION, 
+                prompt
+            )
+            item.entry["emotion"] = self.extract_json_field(response, "emotion", item.video_path)
+            
+            if item.role == "client":
+                # Analysis for client
+                response = await self._call_local_videollama(
+                    item.video_path,
+                    VIDEO_TEXT_EMOTION_ANALYSIS,
+                    VIDEO_TEXT_ANALYSIS_TEMPLATE
+                )
+                item.entry["analysis"] = self.extract_json_field(response, "emotional_cues", item.video_path)
+            else:
+                # Strategy prediction for therapist
+                prompt = STRATEGY_TEMPLATE.format(context=item.context)
+                response = await self._call_local_videollama(
+                    item.video_path,
+                    VIDEO_TEXT_STRATEGY,
+                    prompt
+                )
+                item.entry["strategy"] = self.extract_json_field(response, "strategy", item.video_path)
+                
+        except Exception as e:
+            self.logger.error(f"Error processing video item {item.video_path}: {str(e)}")
 
     async def process_entry(self, entry: Dict) -> Dict:
         """
@@ -674,15 +721,15 @@ class TranscriptAnnotator:
                     # Text emotion detection for short client clips
                     prompt = TEXT_EMOTION_TEMPLATE.format(role=role, dialogue=dialogue)
                     response = await self.call_model(TEXT_EMOTION_DETECTION, prompt)
-                    entry["emotion"] = self.extract_json_field(response, "emotion")
+                    entry["emotion"] = self.extract_json_field(response, "emotion", video_path)
                 else:
                     # Video-text emotion detection and analysis for long client clips
                     prompt = VIDEO_TEXT_EMOTION_TEMPLATE.format(dialogue=dialogue)
                     response = await self.call_model(VIDEO_TEXT_EMOTION_DETECTION, prompt, video_path)
-                    entry["emotion"] = self.extract_json_field(response, "emotion")
+                    entry["emotion"] = self.extract_json_field(response, "emotion", video_path)
 
                     response = await self.call_model(VIDEO_TEXT_EMOTION_ANALYSIS, VIDEO_TEXT_ANALYSIS_TEMPLATE, video_path)
-                    entry["analysis"] = self.extract_json_field(response, "emotional_cues")
+                    entry["analysis"] = self.extract_json_field(response, "emotional_cues", video_path)
 
             # Therapist clips
             else:
@@ -690,20 +737,20 @@ class TranscriptAnnotator:
                     # Text emotion detection and strategy prediction for short therapist clips
                     prompt = TEXT_EMOTION_TEMPLATE.format(role=role, dialogue=dialogue)
                     response = await self.call_model(TEXT_EMOTION_DETECTION, prompt)
-                    entry["emotion"] = self.extract_json_field(response, "emotion")
+                    entry["emotion"] = self.extract_json_field(response, "emotion", video_path)
 
                     prompt = STRATEGY_TEMPLATE.format(context=context)
                     response = await self.call_model(TEXT_STRATEGY, prompt)
-                    entry["strategy"] = self.extract_json_field(response, "strategy")
+                    entry["strategy"] = self.extract_json_field(response, "strategy", video_path)
                 else:
                     # Video-text emotion detection and strategy prediction for long therapist clips
                     prompt = VIDEO_TEXT_EMOTION_TEMPLATE.format(dialogue=dialogue)
                     response = await self.call_model(VIDEO_TEXT_EMOTION_DETECTION, prompt, video_path)
-                    entry["emotion"] = self.extract_json_field(response, "emotion")
+                    entry["emotion"] = self.extract_json_field(response, "emotion", video_path)
 
                     prompt = STRATEGY_TEMPLATE.format(context=context)
                     response = await self.call_model(VIDEO_TEXT_STRATEGY, prompt, video_path)
-                    entry["strategy"] = self.extract_json_field(response, "strategy")
+                    entry["strategy"] = self.extract_json_field(response, "strategy", video_path)
 
             return entry
 
@@ -716,15 +763,18 @@ class TranscriptAnnotator:
         Process all transcripts with optimized memory usage.
         
         Main processing pipeline that handles reading input, processing all
-        entries with appropriate models, and saving results.
+        entries with appropriate models, and saving results. VideoLLaMA 
+        processing is done sequentially to prevent memory issues, while
+        LLaMA processing remains asynchronous for better performance.
         
         Args:
             input_file (str): Path to input JSON file
             output_file (str): Path to output JSON file
             
         Note:
-            For local processing, handles models sequentially to optimize memory.
-            For Gemini API, processes all entries in parallel.
+            - VideoLLaMA processing is sequential to prevent memory issues
+            - LLaMA processing remains asynchronous for better throughput
+            - For Gemini API, processes all entries in parallel
         
         Raises:
             Exception: If there's an error during processing
@@ -740,29 +790,28 @@ class TranscriptAnnotator:
                 text_items, video_items = self._sort_processing_items(transcripts)
                 self.logger.info(f"Sorted {len(text_items)} text items and {len(video_items)} video items")
 
-                # Process text items with LLaMA
+                # Process text items with LLaMA (keep async for better throughput)
                 if text_items:
                     self.logger.info("Processing text-only items with LLaMA...")
                     self._init_llama_model()
                     await asyncio.gather(*[self._process_text_item(item) for item in text_items])
                     self._cleanup_llama_model()
 
-                # Process video items with VideoLLaMA
+                # Process video items sequentially with VideoLLaMA
                 if video_items:
-                    self.logger.info("Processing video items with VideoLLaMA...")
+                    self.logger.info("Processing video items with VideoLLaMA sequentially...")
                     self._init_videollama_model()
-                    await asyncio.gather(*[self._process_video_item(item) for item in video_items])
+                    for item in video_items:
+                        self.logger.debug(f"Processing video item: {item.video_path}")
+                        await self._process_video_item_sequential(item)
                     self._cleanup_videollama_model()
                 
-                # For local processing, entries are updated in-place through text_items and video_items
-                # so transcripts already contains the updated data
             else:
                 # Use Gemini API and update transcripts with processed results
                 self.logger.info(f"Processing {len(transcripts)} entries using Gemini API...")
                 processed_entries = await asyncio.gather(
                     *[self.process_entry(entry) for entry in transcripts]
                 )
-                # Update transcripts with processed results
                 transcripts = processed_entries
 
             # Save processed entries
