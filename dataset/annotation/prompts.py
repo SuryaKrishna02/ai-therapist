@@ -59,16 +59,6 @@ You are an experienced psychologist who is expert in extracting \
 emotion-related cues from the video of the person speaking.
 
 Note: Always focus on the person who is speaking to classify the emotion.
-Note: Don't give the extra reasoning other than the below expected output format.
-Note: The output format should be in the json format with `emotional_cues`.
-Output Format:
-```json
-{
-    "emotional_cues": "The speaker seems to be in a state of contemplation \
-                    or thoughtfulness, as she is looking directly into the camera \
-                    with a serious expression on her face."
-}
-```
 """
 
 VIDEO_TEXT_STRATEGY = """\
@@ -113,7 +103,7 @@ Your task is to extract the cues of the speaker by answering the following quest
 Question 1: "What is the emotional state of the speaker?"
 Question 2: "What life distress might explain the speaker's emotional \
 expression and posture in the video?"
-Answers should be summarized into one or two lines as a single answer.
+Answers from question 1 and question 2 should be combined into a single answer.
 """
 STRATEGY_TEMPLATE = """\
 Previous Conversation:

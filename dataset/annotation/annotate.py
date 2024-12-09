@@ -324,7 +324,7 @@ class TranscriptAnnotator:
             
         except Exception as e:
             self.logger.error(f"Error calling VideoLLaMA: {str(e)}")
-            raise ModelError(f"VideoLLaMA inference failed: {str(e)}")
+            return ""
 
     @sleep_and_retry
     @limits(calls=CALLS_PER_MINUTE, period=60)
@@ -588,13 +588,13 @@ class TranscriptAnnotator:
             # Emotion detection
             prompt = TEXT_EMOTION_TEMPLATE.format(role=item.role, dialogue=item.dialogue)
             response = await self._call_local_llama(TEXT_EMOTION_DETECTION, prompt)
-            item.entry["emotion"] = self.extract_json_field(response, "emotion", item.path)
+            item.entry["emotion"] = self.extract_json_field(response, "emotion", item.entry["path"])
             
             # Strategy prediction for therapist
             if item.role == "therapist":
                 prompt = STRATEGY_TEMPLATE.format(context=item.context)
                 response = await self._call_local_llama(TEXT_STRATEGY, prompt)
-                item.entry["strategy"] = self.extract_json_field(response, "strategy", item.path)
+                item.entry["strategy"] = self.extract_json_field(response, "strategy", item.entry["path"])
                 
         except Exception as e:
             self.logger.error(f"Error processing text item: {str(e)}")
@@ -621,7 +621,7 @@ class TranscriptAnnotator:
                 VIDEO_TEXT_EMOTION_DETECTION, 
                 prompt
             )
-            item.entry["emotion"] = self.extract_json_field(response, "emotion", item.path)
+            item.entry["emotion"] = self.extract_json_field(response, "emotion", item.entry["path"])
             
             if item.role == "client":
                 # Analysis for client
@@ -630,7 +630,7 @@ class TranscriptAnnotator:
                     VIDEO_TEXT_EMOTION_ANALYSIS,
                     VIDEO_TEXT_ANALYSIS_TEMPLATE
                 )
-                item.entry["analysis"] = self.extract_json_field(response, "emotional_cues", item.path)
+                item.entry["analysis"] = response
             else:
                 # Strategy prediction for therapist
                 prompt = STRATEGY_TEMPLATE.format(context=item.context)
@@ -639,7 +639,7 @@ class TranscriptAnnotator:
                     VIDEO_TEXT_STRATEGY,
                     prompt
                 )
-                item.entry["strategy"] = self.extract_json_field(response, "strategy", item.path)
+                item.entry["strategy"] = self.extract_json_field(response, "strategy", item.entry["path"])
                 
         except Exception as e:
             self.logger.error(f"Error processing video item: {str(e)}")
@@ -677,7 +677,7 @@ class TranscriptAnnotator:
                     VIDEO_TEXT_EMOTION_ANALYSIS,
                     VIDEO_TEXT_ANALYSIS_TEMPLATE
                 )
-                item.entry["analysis"] = self.extract_json_field(response, "emotional_cues", item.video_path)
+                item.entry["analysis"] = response
             else:
                 # Strategy prediction for therapist
                 prompt = STRATEGY_TEMPLATE.format(context=item.context)
@@ -729,7 +729,7 @@ class TranscriptAnnotator:
                     entry["emotion"] = self.extract_json_field(response, "emotion", video_path)
 
                     response = await self.call_model(VIDEO_TEXT_EMOTION_ANALYSIS, VIDEO_TEXT_ANALYSIS_TEMPLATE, video_path)
-                    entry["analysis"] = self.extract_json_field(response, "emotional_cues", video_path)
+                    entry["analysis"] = response
 
             # Therapist clips
             else:
