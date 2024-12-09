@@ -2,52 +2,13 @@ import re
 import os
 import json
 import shutil
-import logging
-import colorlog
 import subprocess
 from pathlib import Path
 from datetime import timedelta
 from google.cloud import storage
+from logger import setup_logging
 from collections import defaultdict
 from typing import List, Dict, Any, Tuple
-
-def setup_logging(name: str) -> logging.Logger:
-    """
-    Set up logging configuration with colorlog
-    
-    Args:
-        name (str): Logger name to be used for the logging instance
-        
-    Returns:
-        logging.Logger: Configured logger instance with color formatting
-    
-    Example:
-        logger = setup_logging("my_module")
-        logger.info("This will be displayed in green")
-        logger.error("This will be displayed in red")
-    """
-    handler = colorlog.StreamHandler()
-    handler.setFormatter(colorlog.ColoredFormatter(
-        '%(log_color)s%(asctime)s - %(levelname)s - %(message)s%(reset)s',
-        datefmt='%Y-%m-%d %H:%M:%S',
-        log_colors={
-            'DEBUG':    'cyan',
-            'INFO':     'green',
-            'WARNING':  'yellow',
-            'ERROR':    'red',
-            'CRITICAL': 'red,bg_white',
-        }
-    ))
-
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.INFO)
-    
-    # Remove any existing handlers to avoid duplicate logs
-    for existing_handler in logger.handlers[:]:
-        logger.removeHandler(existing_handler)
-    
-    logger.addHandler(handler)
-    return logger
 
 class TranscriptStatistics:
     """
@@ -85,7 +46,7 @@ class TranscriptStatistics:
         """
         Initialize statistics tracking with default values for all counters and collections.
         """
-        self.logger = setup_logging(f"{__name__}.TranscriptStatistics")
+        self.logger = setup_logging(self.__class__.__name__)
         self.format_zero_string = "0 (0.00%)"
         self.num_playlists = 0
         self.num_videos = 0
@@ -355,7 +316,7 @@ class TranscriptProcessor:
         if storage_type == 'gcs' and project_id is None:
             raise ValueError("project_id is required for GCS storage")
             
-        self.logger = setup_logging(f"{__name__}.TranscriptProcessor")
+        self.logger = setup_logging(self.__class__.__name__)
         self.storage_type = storage_type
         self.base_path = base_path
         self.file_not_found_error = "File Not Found"

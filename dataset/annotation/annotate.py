@@ -3,12 +3,11 @@ import json
 import torch
 import random
 import backoff
-import logging
 import asyncio
 import vertexai
-import colorlog
 import transformers
 from datetime import datetime
+from logger import setup_logging
 from dataclasses import dataclass
 from google.api_core import exceptions
 from ratelimit import limits, sleep_and_retry
@@ -136,7 +135,7 @@ class TranscriptAnnotator:
         """
         self.use_local = use_local
         self.model_name = model_name
-        self.setup_logger()
+        self.logger = setup_logging(self.__class__.__name__)
         
         if not use_local:
             vertexai.init(project=PROJECT_ID, location=LOCATION)
@@ -146,38 +145,6 @@ class TranscriptAnnotator:
         self.video_model = None
         self.processor = None
         self.tokenizer = None
-
-    def setup_logger(self):
-        """
-        Configure colored logging for the TranscriptAnnotator.
-        
-        Sets up a logger with colored output formatting for different log levels
-        and ensures no duplicate handlers exist.
-        
-        Returns:
-            None
-        """
-        handler = colorlog.StreamHandler()
-        handler.setFormatter(colorlog.ColoredFormatter(
-            '%(log_color)s%(asctime)s - %(levelname)s - %(message)s%(reset)s',
-            datefmt='%Y-%m-%d %H:%M:%S',
-            log_colors={
-                'DEBUG':    'cyan',
-                'INFO':     'green',
-                'WARNING':  'yellow',
-                'ERROR':    'red',
-                'CRITICAL': 'red,bg_white',
-            }
-        ))
-
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.INFO)
-        
-        # Remove any existing handlers to avoid duplicate logs
-        for existing_handler in self.logger.handlers[:]:
-            self.logger.removeHandler(existing_handler)
-            
-        self.logger.addHandler(handler)
 
     def _init_llama_model(self):
         """

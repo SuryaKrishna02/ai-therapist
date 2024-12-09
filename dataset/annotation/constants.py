@@ -33,3 +33,24 @@ LOCATION = "us-central1"
 PROJECT_ID = "x-casing-442000-s1"
 MODEL_NAME = "gemini-1.5-flash-002"
 DATA_BUCKET_NAME = "ai-therapist-data"
+
+# Data processing configurations
+CONTEXT_WINDOW = 5
+TRAIN_RATIO = 0.8
+VAL_RATIO = 0
+TEST_RATIO = 0.2
+RANDOM_SEED = 42
+
+# Template configurations
+INSTRUCTION_TEMPLATE = """\
+You are a compassionate and skilled therapist with tons of experience.
+Using past conversations context, for each client input: 
+(1) Identify the client's emotion; 
+(2) Reflect on your emotion as the therapist; 
+(3) Determine a therapeutic strategy
+(4) Provide a compassionate and helpful response.
+"""
+
+# File path patterns
+CLIP_PATH_PATTERN = r'(playlist_\d+/video_\d+)'
+CLIP_NUMBER_PATTERN = r'clip_(\d+)'
