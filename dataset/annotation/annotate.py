@@ -99,7 +99,7 @@ class TranscriptAnnotator:
             
             # Initialize VideoLLaMA model
             self.logger.info("Initializing VideoLLaMA model...")
-            model_path = "DAMO-NLP-SG/VideoLLaMA2.1-7B-AV"
+            model_path = "DAMO-NLP-SG/VideoLLaMA2-7B-16F"
             self.video_model, self.processor, self.tokenizer = model_init(model_path)
             
         except Exception as e:
@@ -153,8 +153,7 @@ class TranscriptAnnotator:
         """
         try:
             # Preprocess video
-            preprocess = self.processor["video"]
-            video_tensor = preprocess(video_path, va=True)
+            video_tensor = self.processor["video"](video_path)
 
             combined_prompt = f"{system_instruction}\n{prompt}"
             
