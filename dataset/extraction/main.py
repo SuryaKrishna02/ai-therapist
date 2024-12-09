@@ -14,18 +14,23 @@ try:
         assemblyai_api_key=ASSEMBLYAI_API_KEY,
         data_dir=DATA_DIR
         )
-    playlists = PLAYLIST_IDS
-    for idx, playlist_id in enumerate(playlists, 1):
-        print(f"\nProcessing playlist {idx}: {playlist_id}")
-        try:
-            processor.process_playlist(playlist_id, idx)
-        except Exception as e:
-            print(f"Error processing playlist {playlist_id}: {e}")
-            continue
+
+    stats = processor.process_multiple_playlists(
+        playlist_ids=PLAYLIST_IDS
+    )
     
-    print("\nAll processing completed.")
+    print("\n=== Processing Complete ===")
+    print(f"Total Playlists Processed: {stats['total_playlists']}")
+    print(f"Total Videos Successfully Processed: {stats['total_videos_processed']}")
+    print(f"Total Videos Failed: {stats['total_videos_failed']}")
+    print(f"Total Clips Extracted: {stats['total_clips_extracted']}")
+    
+    if stats['failed_playlists']:
+        print("\nFailed Playlists:")
+        for playlist_id in stats['failed_playlists']:
+            print(f"- {playlist_id}")
 except Exception as e:
-    print(f"Error Processing playlist: {str(e)}")
+    print(f"Error Processing playlists: {str(e)}")
 
 try:
     uploader = GCSUploader()

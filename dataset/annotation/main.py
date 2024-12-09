@@ -7,27 +7,28 @@ from constants import (
     MODEL_NAME
 )
 
-output_path = "processed_transcripts.json"
-input_transcripts_file = "sample_transcripts.json"
-output_transcripts_file = "annotated_transcripts.json"
+processed_transcripts_path = "processed_transcripts.json"
+annotated_transcripts_path = "annotated_transcripts.json"
 
 try:
     processor = TranscriptProcessor(
         bucket_name=DATA_BUCKET_NAME, 
         project_id=PROJECT_ID
         )
-    processor.save_to_json(output_path)
+    processor.save_to_json(processed_transcripts_path)
 except Exception as e:
     print(f"Error processing transcripts: {str(e)}")
 
-# try:
-#     # Initialize annotator
-#     annotator = TranscriptAnnotator(
-#         model_name=MODEL_NAME
-#     )
+try:
+    annotator = TranscriptAnnotator(
+        model_name=MODEL_NAME
+    )
 
-#     # Run processing
-#     asyncio.run(annotator.process_transcripts(input_transcripts_file, output_transcripts_file))
+    asyncio.run(annotator.process_transcripts(
+        input_file=processed_transcripts_path, 
+        output_file=annotated_transcripts_path
+        )
+    )
 
-# except Exception as e:
-#     print(f"Error annotating videos: {str(e)}")
+except Exception as e:
+    print(f"Error annotating videos: {str(e)}")

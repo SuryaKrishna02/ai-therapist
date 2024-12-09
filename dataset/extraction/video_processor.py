@@ -3,32 +3,55 @@ import json
 import yt_dlp
 import subprocess
 import assemblyai as aai
-from typing import List, Optional
 from googleapiclient.discovery import build
+from typing import List, Dict, Any, Optional
 from googleapiclient.errors import HttpError
 
-class YouTubeAPI:
+class YouTubeProcessor:
     """
-    Handles interactions with the YouTube Data API.
+    Main class for processing YouTube videos, including downloading, conversion,
+    transcription, and clip extraction.
     
     Attributes:
-        api_key (str): YouTube Data API key for authentication
-        youtube: YouTube API service object
+        data_dir (str): Base directory for storing processed data
+        youtube_api_key (str): API key for YouTube Data API
+        assemblyai_api_key (str): API key for AssemblyAI transcription service
+        youtube: YouTube API client instance
     """
     
-    def __init__(self, api_key: str):
+    def __init__(self, data_dir: str = 'data', 
+                 youtube_api_key: Optional[str] = None,
+                 assemblyai_api_key: Optional[str] = None):
         """
-        Initialize the YouTube API client.
+        Initialize the VideoProcessor with necessary API keys and directories.
         
         Args:
-            api_key (str): YouTube Data API key
+            data_dir (str): Base directory for storing processed data
+            youtube_api_key (str, optional): YouTube Data API key
+            assemblyai_api_key (str, optional): AssemblyAI API key
+        
+        Raises:
+            ValueError: If required API keys are not provided or found in environment
         """
-        self.api_key = api_key
-        self.youtube = build("youtube", "v3", developerKey=api_key)
+        self.data_dir = data_dir
+        os.makedirs(data_dir, exist_ok=True)
+        
+        # Setup API keys
+        self.youtube_api_key = youtube_api_key or os.environ.get('YOUTUBE_API_KEY')
+        if not self.youtube_api_key:
+            raise ValueError("YouTube API key must be provided or set in environment")
+            
+        self.assemblyai_api_key = assemblyai_api_key or os.environ.get('ASSEMBLYAI_API_KEY')
+        if not self.assemblyai_api_key:
+            raise ValueError("AssemblyAI API key must be provided or set in environment")
+            
+        # Initialize YouTube API client
+        self.youtube = build('youtube', 'v3', developerKey=self.youtube_api_key)
+        aai.settings.api_key = self.assemblyai_api_key
 
     def get_video_ids_from_playlist(self, playlist_id: str, playlist_dir: str) -> List[str]:
         """
-        Retrieve all video IDs from a YouTube playlist with caching support.
+        Retrieve all video IDs from a YouTube playlist, with caching.
         
         Args:
             playlist_id (str): YouTube playlist ID
@@ -36,9 +59,13 @@ class YouTubeAPI:
             
         Returns:
             List[str]: List of video IDs from the playlist
+            
+        Raises:
+            HttpError: If there's an error accessing the YouTube API
         """
         video_ids_file = os.path.join(playlist_dir, 'video_ids.json')
         
+        # Check cache first
         if os.path.exists(video_ids_file):
             print(f"Loading cached video IDs for playlist {playlist_id}")
             with open(video_ids_file, 'r') as f:
@@ -75,75 +102,95 @@ class YouTubeAPI:
 
         return video_ids
 
-class VideoProcessor:
-    """
-    Handles video downloading, conversion, and clip extraction operations.
-    
-    Attributes:
-        target_fps (int): Target frame rate for video conversion
-    """
-    
-    def __init__(self, target_fps: int = 16):
+    def get_video_metadata(self, video_file: str) -> Dict[str, Any]:
         """
-        Initialize the VideoProcessor.
-        
-        Args:
-            target_fps (int, optional): Target frame rate for video conversion. Defaults to 16.
-        """
-        self.target_fps = target_fps
-
-    @staticmethod
-    def get_video_fps(video_file: str) -> Optional[float]:
-        """
-        Get the frame rate of a video file.
+        Retrieve video metadata using ffprobe.
         
         Args:
             video_file (str): Path to video file
             
         Returns:
-            Optional[float]: Frame rate of the video, or None if unable to determine
+            Dict containing:
+                - fps (float): Frames per second
+                - duration (float): Duration in seconds
+                - has_video (bool): Whether video track exists
+                - has_audio (bool): Whether audio track exists
         """
         try:
-            result = subprocess.run(
-                ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
-                 '-show_entries', 'stream=r_frame_rate',
-                 '-of', 'default=noprint_wrappers=1:nokey=1', video_file],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
+            # Get FPS
+            fps_result = subprocess.run(
+                ['ffprobe', '-v', 'error', '-select_streams', 'v:0', 
+                 '-show_entries', 'stream=r_frame_rate', '-of', 
+                 'default=noprint_wrappers=1:nokey=1', video_file],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
             )
-            fps = result.stdout.strip()
-            if fps:
-                num, denom = map(int, fps.split('/'))
-                return num / denom
-            return None
+            
+            # Get duration
+            duration_result = subprocess.run(
+                ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+                 '-of', 'default=noprint_wrappers=1:nokey=1', video_file],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            )
+            
+            # Check streams
+            streams_result = subprocess.run(
+                ['ffprobe', '-v', 'error', '-show_streams', '-of', 'json', video_file],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            )
+            
+            # Parse results
+            fps = None
+            if fps_result.stdout.strip():
+                num, denom = map(int, fps_result.stdout.strip().split('/'))
+                fps = num / denom
+                
+            duration = float(duration_result.stdout.strip()) if duration_result.stdout.strip() else None
+            
+            streams = json.loads(streams_result.stdout)['streams']
+            has_video = any(s['codec_type'] == 'video' for s in streams)
+            has_audio = any(s['codec_type'] == 'audio' for s in streams)
+            
+            return {
+                'fps': fps,
+                'duration': duration,
+                'has_video': has_video,
+                'has_audio': has_audio
+            }
+            
         except Exception as e:
-            print(f"FPS detection failed for {video_file}: {e}")
-            return None
+            print(f"Error getting video metadata: {e}")
+            return {
+                'fps': None,
+                'duration': None,
+                'has_video': False,
+                'has_audio': False
+            }
 
-    def download_and_convert_video(self, video_id: str, output_dir: str) -> bool:
+    def download_and_convert_video(self, video_id: str, output_dir: str, 
+                                 target_fps: int = 16) -> bool:
         """
-        Download and convert a YouTube video to the target frame rate.
+        Download YouTube video and convert to target FPS.
         
         Args:
             video_id (str): YouTube video ID
-            output_dir (str): Directory to save the processed video
+            output_dir (str): Directory to save the video
+            target_fps (int): Target frames per second
             
         Returns:
             bool: True if successful, False otherwise
         """
-        video_file = os.path.join(output_dir, f'{video_id}.mp4')
-        temp_file = os.path.join(output_dir, f'temp_{video_id}.mp4')
-        
+        video_file = os.path.join(output_dir, 'video.mp4')
+        temp_file = os.path.join(output_dir, 'temp_video.mp4')
         os.makedirs(output_dir, exist_ok=True)
-
+        
         # Check existing video
         if os.path.exists(video_file):
-            current_fps = self.get_video_fps(video_file)
-            if current_fps and round(current_fps) == self.target_fps:
-                print(f"Video already at target {self.target_fps}fps")
+            metadata = self.get_video_metadata(video_file)
+            if not metadata['has_video']:
+                return False
+            if round(metadata['fps']) == target_fps:
                 return True
-
+                
         # Download if needed
         if not os.path.exists(video_file):
             try:
@@ -155,15 +202,15 @@ class VideoProcessor:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     ydl.download([f'https://www.youtube.com/watch?v={video_id}'])
             except Exception as e:
-                print(f"Download failed for video {video_id}: {e}")
+                print(f"Download error: {e}")
                 return False
-
-        # Convert frame rate
+                
+        # Convert FPS
         try:
             subprocess.run([
                 'ffmpeg', '-y',
                 '-i', video_file,
-                '-r', str(self.target_fps),
+                '-r', str(target_fps),
                 '-c:v', 'libx264',
                 '-crf', '23',
                 '-preset', 'fast',
@@ -175,51 +222,29 @@ class VideoProcessor:
             os.replace(temp_file, video_file)
             
             # Verify conversion
-            if self.get_video_fps(video_file) is None:
-                print(f"Video {video_id} corrupted during conversion")
-                return False
-                
-            return True
+            metadata = self.get_video_metadata(video_file)
+            return metadata['has_video']
             
         except subprocess.CalledProcessError as e:
-            print(f"Conversion failed for video {video_id}: {e}")
+            print(f"Conversion error: {e}")
             if os.path.exists(temp_file):
                 os.remove(temp_file)
             return False
 
-class AudioProcessor:
-    """
-    Handles audio extraction and transcription operations.
-    
-    Attributes:
-        aai_api_key (str): AssemblyAI API key for transcription services
-    """
-    
-    def __init__(self, aai_api_key: str):
-        """
-        Initialize the AudioProcessor.
-        
-        Args:
-            aai_api_key (str): AssemblyAI API key
-        """
-        self.aai_api_key = aai_api_key
-        aai.settings.api_key = aai_api_key
-
     def extract_audio(self, video_path: str, audio_path: str) -> bool:
         """
-        Extract audio from a video file.
+        Extract audio from video file.
         
         Args:
-            video_path (str): Path to source video file
+            video_path (str): Path to video file
             audio_path (str): Path to save extracted audio
             
         Returns:
             bool: True if successful, False otherwise
         """
         if os.path.exists(audio_path):
-            print(f"Audio already extracted for {os.path.basename(video_path)}")
             return True
-
+            
         try:
             subprocess.run([
                 'ffmpeg',
@@ -232,228 +257,238 @@ class AudioProcessor:
             ], check=True)
             return True
         except subprocess.CalledProcessError as e:
-            print(f"Audio extraction failed: {e}")
+            print(f"Audio extraction error: {e}")
             return False
 
-    def transcribe_audio(self, audio_file: str, txt_output: str, json_output: str) -> bool:
+    def transcribe_audio_diarization(self, audio_file: str, 
+                                   output_txt_file: str,
+                                   output_json_file: str) -> bool:
         """
         Transcribe audio with speaker diarization using AssemblyAI.
         
         Args:
             audio_file (str): Path to audio file
-            txt_output (str): Path to save text transcript
-            json_output (str): Path to save JSON transcript with timestamps
+            output_txt_file (str): Path to save text transcript
+            output_json_file (str): Path to save JSON transcript with timestamps
             
         Returns:
             bool: True if successful, False otherwise
         """
-        if os.path.exists(json_output) and os.path.exists(txt_output):
-            print(f"Transcripts already exist for {audio_file}")
+        if os.path.exists(output_json_file) and os.path.exists(output_txt_file):
             return True
-
+            
         try:
             config = aai.TranscriptionConfig(
                 speaker_labels=True,
                 speakers_expected=2,
                 punctuate=True,
-                format_text=True
+                format_text=True,
             )
             
             transcriber = aai.Transcriber()
             transcript = transcriber.transcribe(audio_file, config=config)
-
-            # Save text transcript
-            with open(txt_output, 'w', encoding='utf-8') as f:
-                for utterance in transcript.utterances:
-                    f.write(f"Speaker {utterance.speaker}: {utterance.text}\n")
-
-            # Save JSON transcript
-            diarized_output = [{
-                'speaker': f"Speaker {u.speaker}",
-                'start': u.start,
-                'end': u.end,
-                'text': u.text
-            } for u in transcript.utterances]
             
-            with open(json_output, 'w', encoding='utf-8') as f:
+            # Save text transcript
+            with open(output_txt_file, 'w', encoding='utf-8') as f:
+                for utterance in transcript.utterances:
+                    speaker = f"Speaker {utterance.speaker}"
+                    f.write(f"{speaker}: {utterance.text}\n")
+                    
+            # Save JSON transcript
+            diarized_output = [
+                {
+                    'speaker': f"Speaker {u.speaker}",
+                    'start': u.start,
+                    'end': u.end,
+                    'text': u.text
+                }
+                for u in transcript.utterances
+            ]
+            
+            with open(output_json_file, 'w', encoding='utf-8') as f:
                 json.dump(diarized_output, f, ensure_ascii=False, indent=4)
-
+                
             return True
             
         except Exception as e:
-            print(f"Transcription failed: {e}")
+            print(f"Transcription error: {e}")
             return False
 
-class VideoClipExtractor:
-    """
-    Handles extraction of video clips based on transcription timestamps.
-    """
-    
-    @staticmethod
-    def get_video_duration(video_file: str) -> Optional[float]:
+    def extract_video_clips(self, video_path: str, diarization_json_path: str, 
+                          clips_output_dir: str) -> List[str]:
         """
-        Get the duration of a video file.
+        Extract video clips based on transcript timestamps.
         
         Args:
-            video_file (str): Path to video file
+            video_path (str): Path to video file
+            diarization_json_path (str): Path to diarization JSON file
+            clips_output_dir (str): Directory to save clips
             
         Returns:
-            Optional[float]: Duration in seconds, or None if unable to determine
+            List[str]: List of paths to successfully extracted clips
         """
-        try:
-            result = subprocess.run(
-                ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
-                 '-of', 'default=noprint_wrappers=1:nokey=1', video_file],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            return float(result.stdout.strip())
-        except Exception as e:
-            print(f"Duration detection failed for {video_file}: {e}")
-            return None
-
-    def extract_clips(self, video_path: str, diarization_json: str, 
-                     output_dir: str, min_duration: float = 3.0) -> bool:
-        """
-        Extract video clips based on transcription timestamps.
+        os.makedirs(clips_output_dir, exist_ok=True)
+        successful_clips = []
         
-        Args:
-            video_path (str): Path to source video
-            diarization_json (str): Path to diarization JSON file
-            output_dir (str): Directory to save extracted clips
-            min_duration (float, optional): Minimum clip duration in seconds. Defaults to 3.0.
+        with open(diarization_json_path, 'r', encoding='utf-8') as f:
+            diarization_data = json.load(f)
             
-        Returns:
-            bool: True if at least one clip was extracted successfully
-        """
-        os.makedirs(output_dir, exist_ok=True)
-        
-        try:
-            with open(diarization_json, 'r', encoding='utf-8') as f:
-                segments = json.load(f)
-        except Exception as e:
-            print(f"Failed to load diarization data: {e}")
-            return False
-
-        success = False
-        for idx, segment in enumerate(segments, 1):
-            clip_path = os.path.join(output_dir, f"clip_{idx:03d}.mp4")
+        for idx, entry in enumerate(diarization_data, 1):
+            start_ms = entry['start']
+            end_ms = entry['end']
+            duration_ms = end_ms - start_ms
             
-            # Skip if valid clip exists
-            if os.path.exists(clip_path):
-                duration = self.get_video_duration(clip_path)
-                if duration and duration >= min_duration:
-                    continue
-
-            # Calculate timing
-            start_sec = segment['start'] / 1000
-            duration_sec = (segment['end'] - segment['start']) / 1000
-            
-            if duration_sec < min_duration:
+            if duration_ms < 3000:  # Skip clips shorter than 3 seconds
                 continue
-
+                
+            clip_filename = os.path.join(clips_output_dir, f"clip_{idx:03d}.mp4")
+            
+            # Check existing clip
+            if os.path.exists(clip_filename):
+                metadata = self.get_video_metadata(clip_filename)
+                if metadata['duration'] and metadata['duration'] >= 3:
+                    successful_clips.append(clip_filename)
+                    continue
+                os.remove(clip_filename)
+                
             try:
                 subprocess.run([
                     'ffmpeg', '-y',
+                    '-ss', str(start_ms / 1000),
                     '-i', video_path,
-                    '-ss', str(start_sec),
-                    '-t', str(duration_sec),
-                    '-c', 'copy',
-                    clip_path
+                    '-t', str(duration_ms / 1000),
+                    '-c:v', 'libx264',
+                    '-crf', '23',
+                    '-preset', 'fast',
+                    '-c:a', 'aac',
+                    clip_filename
                 ], check=True)
-                success = True
+                
+                successful_clips.append(clip_filename)
+                
             except subprocess.CalledProcessError as e:
-                print(f"Failed to extract clip {idx}: {e}")
+                print(f"Error extracting clip {idx}: {e}")
                 continue
+                
+        return successful_clips
 
-        return success
-
-class YouTubeProcessor:
-    """
-    Main class that orchestrates the entire YouTube video processing pipeline.
-    
-    Attributes:
-        youtube_api (YouTubeAPI): YouTube API client
-        video_processor (VideoProcessor): Video processing handler
-        audio_processor (AudioProcessor): Audio processing handler
-        clip_extractor (VideoClipExtractor): Clip extraction handler
-        data_dir (str): Base directory for all processed data
-    """
-    
-    def __init__(self, youtube_api_key: str, assemblyai_api_key: str, data_dir: str = 'data'):
+    def process_playlist(self, playlist_id: str, playlist_idx: int) -> Dict[str, Any]:
         """
-        Initialize the YouTube processing pipeline.
-        
-        Args:
-            youtube_api_key (str): YouTube Data API key
-            assemblyai_api_key (str): AssemblyAI API key
-            data_dir (str, optional): Base directory for processed data. Defaults to 'data'.
-        """
-        self.youtube_api = YouTubeAPI(youtube_api_key)
-        self.video_processor = VideoProcessor()
-        self.audio_processor = AudioProcessor(assemblyai_api_key)
-        self.clip_extractor = VideoClipExtractor()
-        self.data_dir = data_dir
-        
-        os.makedirs(data_dir, exist_ok=True)
-
-    def process_playlist(self, playlist_id: str, playlist_idx: int) -> None:
-        """
-        Process all videos in a YouTube playlist.
+        Process an entire YouTube playlist.
         
         Args:
             playlist_id (str): YouTube playlist ID
-            playlist_idx (int): Index for playlist directory naming
+            playlist_idx (int): Index number for the playlist
+            
+        Returns:
+            Dict containing:
+                - success (bool): Overall success status
+                - videos_processed (int): Number of videos processed
+                - videos_failed (int): Number of videos that failed
+                - clips_extracted (int): Total number of clips extracted
         """
+        stats = {
+            'success': False,
+            'videos_processed': 0,
+            'videos_failed': 0,
+            'clips_extracted': 0
+        }
+        
         playlist_dir = os.path.join(self.data_dir, f'playlist_{playlist_idx}')
         os.makedirs(playlist_dir, exist_ok=True)
         
-        video_ids = self.youtube_api.get_video_ids_from_playlist(playlist_id, playlist_dir)
-        print(f"Processing {len(video_ids)} videos from playlist {playlist_id}")
-        
-        for vid_idx, video_id in enumerate(video_ids, 1):
-            self.process_video(video_id, playlist_dir, vid_idx)
+        try:
+            video_ids = self.get_video_ids_from_playlist(playlist_id, playlist_dir)
+            
+            for vid_idx, video_id in enumerate(video_ids, 1):
+                video_dir = os.path.join(playlist_dir, f'video_{vid_idx}')
+                os.makedirs(video_dir, exist_ok=True)
+                
+                # Set up file paths
+                video_file = os.path.join(video_dir, 'video.mp4')
+                audio_file = os.path.join(video_dir, 'audio.mp3')
+                transcript_file = os.path.join(video_dir, 'transcript.txt')
+                transcript_json = os.path.join(video_dir, 'transcript_timestamps.json')
+                clips_dir = os.path.join(video_dir, 'clips')
+                
+                print(f"\nProcessing video {vid_idx}/{len(video_ids)}: {video_id}")
+                
+                try:
+                    # Download and convert video
+                    if not self.download_and_convert_video(video_id, video_dir):
+                        print(f"Failed to process video {video_id}")
+                        stats['videos_failed'] += 1
+                        continue
+                        
+                    # Extract audio
+                    if not self.extract_audio(video_file, audio_file):
+                        print(f"Failed to extract audio for {video_id}")
+                        stats['videos_failed'] += 1
+                        continue
+                        
+                    # Transcribe audio
+                    if not self.transcribe_audio_diarization(
+                        audio_file, transcript_file, transcript_json):
+                        print(f"Failed to transcribe audio for {video_id}")
+                        stats['videos_failed'] += 1
+                        continue
+                        
+                    # Extract clips
+                    clips = self.extract_video_clips(
+                        video_file, transcript_json, clips_dir)
+                    stats['clips_extracted'] += len(clips)
+                    stats['videos_processed'] += 1
+                    
+                except Exception as e:
+                    print(f"Error processing video {video_id}: {e}")
+                    stats['videos_failed'] += 1
+                    continue
+                    
+            stats['success'] = True
+            return stats
+            
+        except Exception as e:
+            print(f"Error processing playlist {playlist_id}: {e}")
+            return stats
 
-    def process_video(self, video_id: str, playlist_dir: str, video_idx: int) -> None:
+    def process_multiple_playlists(self, playlist_ids: List[str]) -> Dict[str, Any]:
         """
-        Process a single video through the entire pipeline.
+        Process multiple YouTube playlists.
         
         Args:
-            video_id (str): YouTube video ID
-            playlist_dir (str): Playlist directory path
-            video_idx (int): Index for video directory naming
+            playlist_ids (List[str]): List of YouTube playlist IDs
+            
+        Returns:
+            Dict containing aggregated statistics:
+                - total_playlists (int): Number of playlists processed
+                - total_videos_processed (int): Total videos successfully processed
+                - total_videos_failed (int): Total videos that failed processing
+                - total_clips_extracted (int): Total clips extracted
+                - failed_playlists (List[str]): List of failed playlist IDs
         """
-        video_dir = os.path.join(playlist_dir, f'video_{video_idx}')
-        os.makedirs(video_dir, exist_ok=True)
+        aggregate_stats = {
+            'total_playlists': len(playlist_ids),
+            'total_videos_processed': 0,
+            'total_videos_failed': 0,
+            'total_clips_extracted': 0,
+            'failed_playlists': []
+        }
         
-        print(f"\nProcessing video {video_idx}: {video_id}")
-        
-        # Setup file paths
-        video_file = os.path.join(video_dir, f'{video_id}.mp4')
-        audio_file = os.path.join(video_dir, f'{video_id}.mp3')
-        transcript_txt = os.path.join(video_dir, 'transcript.txt')
-        transcript_json = os.path.join(video_dir, 'transcript_timestamps.json')
-        clips_dir = os.path.join(video_dir, 'clips')
-        
-        # Step 1: Download and convert video
-        if not self.video_processor.download_and_convert_video(video_id, video_dir):
-            print(f"Failed to process video {video_id}. Skipping remaining steps.")
-            return
+        for playlist_idx, playlist_id in enumerate(playlist_ids, 1):
+            print(f"\nProcessing playlist {playlist_idx}/{len(playlist_ids)}: {playlist_id}")
             
-        # Step 2: Extract audio
-        if not self.audio_processor.extract_audio(video_file, audio_file):
-            print(f"Failed to extract audio from {video_id}. Skipping remaining steps.")
-            return
-            
-        # Step 3: Transcribe audio
-        if not self.audio_processor.transcribe_audio(audio_file, transcript_txt, transcript_json):
-            print(f"Failed to transcribe audio from {video_id}. Skipping remaining steps.")
-            return
-            
-        # Step 4: Extract clips
-        if not self.clip_extractor.extract_clips(video_file, transcript_json, clips_dir):
-            print(f"Failed to extract clips from {video_id}")
-            return
-            
-        print(f"Successfully processed video {video_id}")
+            try:
+                stats = self.process_playlist(playlist_id, playlist_idx)
+                
+                if stats['success']:
+                    aggregate_stats['total_videos_processed'] += stats['videos_processed']
+                    aggregate_stats['total_videos_failed'] += stats['videos_failed']
+                    aggregate_stats['total_clips_extracted'] += stats['clips_extracted']
+                else:
+                    aggregate_stats['failed_playlists'].append(playlist_id)
+                    
+            except Exception as e:
+                print(f"Failed to process playlist {playlist_id}: {e}")
+                aggregate_stats['failed_playlists'].append(playlist_id)
+                
+        return aggregate_stats
