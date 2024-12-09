@@ -119,27 +119,28 @@ class TranscriptAnnotator:
         """
         try:
             # Concatenate system instruction and prompt with newline
-            combined_prompt = f"{system_instruction}\n{prompt}"
+            messages = [
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": prompt},
+            ]
             
             outputs = self.llama_pipeline(
-                combined_prompt,
+                messages,
                 max_new_tokens=1024,
-                do_sample=True,
-                temperature=0.7,
-                top_p=0.95,
+                temperature=0.1
             )
             
             # Extract the generated response
             full_response = outputs[0]['generated_text'][-1]['content']
             # Return only the newly generated text (after the prompt)
-            response = full_response[len(combined_prompt):].strip()
+            response = full_response.strip()
             return response
             
         except Exception as e:
             self.logger.error(f"Error calling local LLaMA: {str(e)}")
             raise ModelError(f"LLaMA inference failed: {str(e)}")
 
-    async def _call_local_videollama(self, video_path: str, prompt: str) -> str:
+    async def _call_local_videollama(self, video_path: str, system_instruction:str, prompt: str) -> str:
         """
         Call local VideoLLaMA model for video processing
         
@@ -154,11 +155,13 @@ class TranscriptAnnotator:
             # Preprocess video
             preprocess = self.processor["video"]
             video_tensor = preprocess(video_path, va=True)
+
+            combined_prompt = f"{system_instruction}\n{prompt}"
             
             # Run inference
             output = mm_infer(
                 video_tensor,
-                prompt,
+                combined_prompt,
                 model=self.video_model,
                 tokenizer=self.tokenizer,
                 modal="video",
@@ -247,7 +250,7 @@ class TranscriptAnnotator:
         """
         if self.use_local:
             if video_path:
-                return await self._call_local_videollama(video_path, prompt)
+                return await self._call_local_videollama(video_path, system_instruction, prompt)
             else:
                 return await self._call_local_llama(system_instruction, prompt)
         else:
