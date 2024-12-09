@@ -18,6 +18,12 @@ into one of the following seven categories:
 
 Note: Always focus on the person who is speaking to classify the emotion.
 Note: The output format should be in the json format with `emotion` as key field without numbers in it.
+Output Format:
+```json
+{{
+    "emotion": "<predicted_emotion>"
+}}
+```
 """
 
 TEXT_EMOTION_DETECTION = """\
@@ -38,6 +44,12 @@ dynamically classify the emotion into one of the following seven categories:
 Note: Based on whether therapist or client is speaking, decide on the emotion appropriately \
 as therapist is most of time in neutral emotion.
 Note: The output format should be in the json format with `emotion` as key field without numbers in it.
+Output Format:
+```json
+{{
+    "emotion": "<predicted_emotion>"
+}}
+```
 """
 
 VIDEO_TEXT_EMOTION_ANALYSIS = """\
@@ -46,7 +58,7 @@ emotion-related cues from the video of the person speaking.
 
 Note: Always focus on the person who is speaking to classify the emotion.
 Note: The output format should be in the json format with `emotional_cues`.
-Expected Output:
+Output Format:
 ```json
 {
     "emotional_cues": "The speaker seems to be in a state of contemplation \
@@ -79,6 +91,12 @@ The following are the ten therapeutic strategies that you might take:
 
 Note: Ponder for while about the conversation that happened until now to decide on the strategy.
 Note: The output format should be in the json format with `strategy` as key field without numbers in it.
+Output Format:
+```json
+{{
+    "strategy": "<predicted_strategy>"
+}}
+```
 """
 
 TEXT_STRATEGY = VIDEO_TEXT_STRATEGY  # Same instruction for text-only strategy prediction
