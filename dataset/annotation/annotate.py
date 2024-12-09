@@ -477,7 +477,7 @@ class TranscriptAnnotator:
                 **error_msg
             }
             
-            with open('json_extraction_errors.json', 'a') as f:
+            with open('./tmp/json_extraction_errors.json', 'a') as f:
                 json.dump(log_entry, f)
                 f.write('\n')
                 
