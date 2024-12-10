@@ -38,7 +38,7 @@ def format_example(example: dict, eos_token: str) -> dict:
     instruction = example["instruction"].strip()
     input_text = example["input"].strip()
     output_text = example["output"].strip()
-    text = f"{instruction}\n{input_text}\n{output_text}{eos_token}"
+    text = f"<<SYS>>{instruction}<<SYS>>\n\n<<CLIENT>>{input_text}<<CLIENT>>\n\n<<THERAPIST>>{output_text}<<THERAPIST>>{eos_token}"
     return {"text": text}
 
 def load_and_prepare_dataset(tokenizer):

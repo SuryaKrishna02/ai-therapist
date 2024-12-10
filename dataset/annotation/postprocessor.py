@@ -203,15 +203,32 @@ class DatasetConverter:
 
             past_context = '\n'.join(list(conversations)) if conversations else "No previous context available."
 
+            # First, create the instruction with context
+            full_instruction = (
+                f"{self.instruction}\n\n"
+                f"Past Conversation Context:\n{past_context}"
+            )
+
+            # Build input string conditionally including emotion analysis
+            input_parts = []
+            # Add emotion analysis if it exists and is meaningful
+            if current_clip.get('analysis') not in ['NA', '', ' ']:
+                input_parts.append(f"Client Emotion Analysis: {current_clip['analysis']}\n")
+
+            input_parts.append(f"Client: {current_clip['transcript']}")
+
+            # Create the dialogue dictionary
             dialogue = {
-                'instruction': self.instruction,
-                'input': f"Past Conversation Context:\n{past_context}\nClient: {current_clip['transcript']}",
-                'output': f"Client Emotion: {current_clip['emotion']}\n"
-                         f"Therapeutic Strategy: {next_therapist['strategy']}\n"
-                         f"Therapist Emotion: {next_therapist['emotion']}\n"
-                         f"Therapist: {next_therapist['transcript']}"
+                'instruction': full_instruction,
+                'input': ''.join(input_parts),
+                'output': (
+                    f"Client Emotion: {current_clip['emotion']}\n"
+                    f"Therapeutic Strategy: {next_therapist['strategy']}\n"
+                    f"Therapist Emotion: {next_therapist['emotion']}\n"
+                    f"Therapist: {next_therapist['transcript']}"
+                )
             }
-            
+                        
             processed_dialogues.append(dialogue)
             conversations.append(self.format_client_info(current_clip))
 

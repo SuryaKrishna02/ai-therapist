@@ -36,9 +36,9 @@ DATA_BUCKET_NAME = "ai-therapist-data"
 
 # Data processing configurations
 CONTEXT_WINDOW = 5
-TRAIN_RATIO = 0.8
+TRAIN_RATIO = 0.9
 VAL_RATIO = 0
-TEST_RATIO = 0.2
+TEST_RATIO = 0.1
 RANDOM_SEED = 42
 
 # Template configurations
