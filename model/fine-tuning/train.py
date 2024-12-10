@@ -65,7 +65,7 @@ def train_model(model, tokenizer, dataset):
             per_device_train_batch_size=TrainingConfig.BATCH_SIZE,
             gradient_accumulation_steps=TrainingConfig.GRAD_ACC_STEPS,
             warmup_steps=5,
-            max_steps=TrainingConfig.MAX_STEPS,
+            num_train_epochs=TrainingConfig.NUM_EPOCHS,
             learning_rate=TrainingConfig.LEARNING_RATE,
             fp16=not is_bfloat16_supported(),
             bf16=is_bfloat16_supported(),

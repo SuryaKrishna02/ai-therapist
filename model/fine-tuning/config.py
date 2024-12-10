@@ -15,7 +15,7 @@ class ModelConfig:
 class TrainingConfig:
     """Configuration for training parameters"""
     LEARNING_RATE: float = 2e-4
-    MAX_STEPS: int = 60
+    NUM_EPOCHS: int = 1
     BATCH_SIZE: int = 2
     GRAD_ACC_STEPS: int = 4
     DATASET_PATH: str = "../dataset/train.jsonl"
