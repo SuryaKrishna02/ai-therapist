@@ -3,7 +3,7 @@ from dataclasses import dataclass
 @dataclass
 class ModelConfig:
     """Configuration for model parameters"""
-    MODEL_NAME: str = "unsloth/Qwen2.5-7B"
+    MODEL_NAME: str = "unsloth/Qwen2.5-7B-Instruct"
     MAX_SEQ_LENGTH: int = 2048
     DTYPE = None
     LOAD_IN_4BIT: bool = True
