@@ -1,8 +1,9 @@
 import re
 import json
 import random
-from pathlib import Path
 from logger import setup_logging
+from huggingface_hub import create_repo
+from datasets import Dataset, DatasetDict
 from collections import defaultdict, deque
 from typing import Dict, List, Any, Tuple, Optional
 from constants import (
@@ -18,36 +19,34 @@ from constants import (
 class DatasetConverter:
     """
     A processor for therapy dialogue data that handles grouping, processing,
-    and splitting of conversation data into training sets.
+    and uploading conversation data to Hugging Face datasets.
     
-    This class provides functionality to:
-    1. Group clips by video
-    2. Process dialogues with context windows
-    3. Split data into train/val/test sets
-    4. Write processed data to JSONL files
+    This class provides functionality to convert raw therapy session data into
+    a structured format suitable for machine learning tasks. It handles the
+    entire pipeline from data grouping to uploading to Hugging Face.
     
     Attributes:
-        context_window (int): Number of past conversations to maintain in context
-        train_ratio (float): Ratio of data to use for training
-        val_ratio (float): Ratio of data to use for validation
-        test_ratio (float): Ratio of data to use for testing
-        instruction (str): Template instruction for the dialogue system
-        logger (logging.Logger): Logger instance for the class
+        context_window (int): Maximum number of previous conversations to include
+        train_ratio (float): Proportion of data to use for training
+        val_ratio (float): Proportion of data to use for validation
+        test_ratio (float): Proportion of data to use for testing
+        instruction (str): Template for system instructions
+        logger: Logger instance for tracking processing
     """
-
+    
     def __init__(self, 
                  context_window: int = CONTEXT_WINDOW, 
                  train_ratio: float = TRAIN_RATIO,
                  val_ratio: float = VAL_RATIO,
                  random_seed: int = RANDOM_SEED):
         """
-        Initialize the DialogueProcessor with specified parameters.
+        Initialize the DatasetConverter with specified parameters.
         
         Args:
-            context_window (int): Number of past conversations to maintain
-            train_ratio (float): Ratio of data for training
-            val_ratio (float): Ratio of data for validation
-            random_seed (int): Random seed for reproducibility
+            context_window (int): Number of previous conversations to include
+            train_ratio (float): Proportion of data for training
+            val_ratio (float): Proportion of data for validation
+            random_seed (int): Seed for random operations
         """
         self.context_window = context_window
         self.train_ratio = train_ratio
@@ -57,15 +56,33 @@ class DatasetConverter:
         self.logger = setup_logging(self.__class__.__name__)
         random.seed(random_seed)
 
-    def format_client_info(self, clip: Dict[str, Any]) -> str:
+    def _check_or_create_repo(self, repo_name: str, token: str) -> bool:
         """
-        Format client information, omitting NA/empty fields.
+        Check if repository exists, create if it doesn't.
         
         Args:
-            clip (Dict[str, Any]): Client clip data
+            repo_name (str): Name of the repository
+            token (str): Hugging Face API token
             
         Returns:
-            str: Formatted client information
+            bool: True if repo exists or was created successfully
+        """
+        try:
+            create_repo(repo_name, private=False, token=token, exist_ok=True, repo_type="dataset")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error checking/creating repository: {str(e)}")
+            return False
+
+    def format_client_info(self, clip: Dict[str, Any]) -> str:
+        """
+        Format client information into a structured string.
+        
+        Args:
+            clip (Dict[str, Any]): Client clip data containing transcript and metadata
+            
+        Returns:
+            str: Formatted string containing client information
         """
         parts = [f"Client: {clip['transcript']}"]
         
@@ -79,13 +96,13 @@ class DatasetConverter:
 
     def format_therapist_info(self, clip: Dict[str, Any]) -> str:
         """
-        Format therapist information, omitting NA/empty fields.
+        Format therapist information into a structured string.
         
         Args:
-            clip (Dict[str, Any]): Therapist clip data
+            clip (Dict[str, Any]): Therapist clip data containing transcript and metadata
             
         Returns:
-            str: Formatted therapist information
+            str: Formatted string containing therapist information
         """
         parts = [f"Therapist: {clip['transcript']}"]
         
@@ -102,14 +119,10 @@ class DatasetConverter:
         Extract playlist and video path from the full path.
         
         Args:
-            path (str): Full path to the clip
+            path (str): Full path to the video clip
             
         Returns:
-            Optional[str]: Extracted path or None if no match found
-        
-        Example:
-            >>> processor.extract_playlist_video_path('../../data/playlist_1/video_1/clips/clip_002.mp4')
-            'playlist_1/video_1'
+            Optional[str]: Extracted playlist/video path or None if not found
         """
         match = re.search(CLIP_PATH_PATTERN, path)
         if match:
@@ -121,10 +134,10 @@ class DatasetConverter:
         Group clips by their playlist/video combination.
         
         Args:
-            data (List[Dict[str, Any]]): List of clip data
+            data (List[Dict[str, Any]]): List of clip data to be grouped
             
         Returns:
-            Dict[str, Dict[str, Any]]: Grouped clips with video IDs as keys
+            Dict[str, Dict[str, Any]]: Clips grouped by video with metadata
         """
         self.logger.info("Starting clip grouping process")
         temp_grouped = defaultdict(list)
@@ -159,7 +172,7 @@ class DatasetConverter:
         Find the next therapist clip after the given index.
         
         Args:
-            clips (List[Dict[str, Any]]): List of clips
+            clips (List[Dict[str, Any]]): List of all clips
             start_idx (int): Starting index to search from
             
         Returns:
@@ -170,15 +183,55 @@ class DatasetConverter:
                 return clips[i]
         return None
 
-    def process_video_dialogues(self, video_data: Dict[str, Any]) -> List[Dict[str, str]]:
+    def _create_conversation_message(self, 
+                                  past_context: str, 
+                                  current_clip: Dict[str, Any], 
+                                  next_therapist: Dict[str, Any]) -> List[Dict[str, str]]:
         """
-        Process a single video's dialogues.
+        Create a structured conversation message from clip data.
+        
+        Args:
+            past_context (str): Previous conversation context
+            current_clip (Dict[str, Any]): Current client clip
+            next_therapist (Dict[str, Any]): Next therapist response
+            
+        Returns:
+            List[Dict[str, str]]: Formatted conversation messages
+        """
+        return [
+            {
+                'content': f"{self.instruction}\n\nPast Conversation Context:\n{past_context}",
+                'role': 'system'
+            },
+            {
+                'content': ''.join([
+                    f"Client Emotion Analysis: {current_clip['analysis']}\n" 
+                    if current_clip.get('analysis') not in ['NA', '', ' '] else "",
+                    f"{current_clip['transcript']}"
+                ]),
+                'role': 'user'
+            },
+            {
+                'content': (
+                    f"Client Emotion: {current_clip['emotion']}\n"
+                    f"Therapeutic Strategy: {next_therapist['strategy']}\n"
+                    f"Therapist Emotion: {next_therapist['emotion']}\n"
+                    f"Therapist Response: {next_therapist['transcript']}"
+                ),
+                'role': 'assistant'
+            }
+        ]
+
+    def process_video_dialogues(self, video_data: Dict[str, Any], start_id: int = 0) -> List[Dict[str, Any]]:
+        """
+        Process a single video's dialogues with sequential IDs.
         
         Args:
             video_data (Dict[str, Any]): Video data containing clips
+            start_id (int): Starting ID for sequential numbering
             
         Returns:
-            List[Dict[str, str]]: List of processed dialogues
+            List[Dict[str, Any]]: List of processed dialogues with IDs
         """
         if not video_data or 'clips' not in video_data:
             self.logger.warning("Invalid video data format")
@@ -187,14 +240,12 @@ class DatasetConverter:
         clips = video_data['clips']
         conversations = deque(maxlen=self.context_window)
         processed_dialogues = []
+        current_id = start_id
 
-        for i, current_clip in enumerate(clips):
+        for i, current_clip in enumerate(clips[:-1]):  # Exclude last clip
             if current_clip['role'] != 'client':
                 if current_clip['role'] == 'therapist':
                     conversations.append(self.format_therapist_info(current_clip))
-                continue
-
-            if i == len(clips) - 1:
                 continue
 
             next_therapist = self.find_next_therapist_clip(clips, i)
@@ -202,34 +253,19 @@ class DatasetConverter:
                 continue
 
             past_context = '\n'.join(list(conversations)) if conversations else "No previous context available."
-
-            # First, create the instruction with context
-            full_instruction = (
-                f"{self.instruction}\n\n"
-                f"Past Conversation Context:\n{past_context}"
+            
+            # Create conversation messages using helper method
+            conversation = self._create_conversation_message(
+                past_context, current_clip, next_therapist
             )
-
-            # Build input string conditionally including emotion analysis
-            input_parts = []
-            # Add emotion analysis if it exists and is meaningful
-            if current_clip.get('analysis') not in ['NA', '', ' ']:
-                input_parts.append(f"Client Emotion Analysis: {current_clip['analysis']}\n")
-
-            input_parts.append(f"Client: {current_clip['transcript']}")
-
-            # Create the dialogue dictionary
-            dialogue = {
-                'instruction': full_instruction,
-                'input': ''.join(input_parts),
-                'output': (
-                    f"Client Emotion: {current_clip['emotion']}\n"
-                    f"Therapeutic Strategy: {next_therapist['strategy']}\n"
-                    f"Therapist Emotion: {next_therapist['emotion']}\n"
-                    f"Therapist: {next_therapist['transcript']}"
-                )
-            }
-                        
-            processed_dialogues.append(dialogue)
+            
+            # Add processed dialogue
+            processed_dialogues.append({
+                'id': current_id,
+                'conversations': conversation
+            })
+            
+            current_id += 1
             conversations.append(self.format_client_info(current_clip))
 
         return processed_dialogues
@@ -239,10 +275,11 @@ class DatasetConverter:
         Split videos into train/val/test according to ratios.
         
         Args:
-            videos (List[Tuple[str, Dict]]): List of video data tuples
+            videos (List[Tuple[str, Dict]]): List of video data to split
             
         Returns:
-            Tuple[List[List[Tuple[str, Dict]]], List[str]]: Split data and split names
+            Tuple[List[List[Tuple[str, Dict]]], List[str]]: 
+                Split data and corresponding split names
         """
         self.logger.info("Starting data split process")
         video_list = list(videos)
@@ -272,35 +309,24 @@ class DatasetConverter:
             
         return splits, split_names
 
-    def write_jsonl(self, data: List[Dict], output_path: Path):
+    def process_and_push_to_hf(self, input_file: str, repo_name: str, hf_token: str, commit_message: str) -> None:
         """
-        Write dialogues to a JSONL file.
-        
-        Args:
-            data (List[Dict]): Data to write
-            output_path (Path): Path to output file
-        """
-        self.logger.info(f"Writing data to {output_path}")
-        with output_path.open('w', encoding='utf-8') as f:
-            for item in data:
-                f.write(json.dumps(item, ensure_ascii=False) + '\n')
-        self.logger.info(f"Wrote {len(data)} entries to {output_path}")
-
-    def process_data(self, input_file: str, output_dir: str) -> None:
-        """
-        Process the entire dataset and generate JSONL files.
+        Process the dataset and push directly to Hugging Face.
         
         Args:
             input_file (str): Path to input JSON file
-            output_dir (str): Directory for output files
+            repo_name (str): Name of the Hugging Face repository
+            hf_token (str): Hugging Face API token
+            commit_message (str): Commit message for the push
         """
         self.logger.info("Starting data processing pipeline")
         self.logger.info(f"Input file: {input_file}")
-        self.logger.info(f"Output directory: {output_dir}")
+        self.logger.info(f"Target repository: {repo_name}")
 
-        # Create output directory
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
+        # Check/create repository
+        if not self._check_or_create_repo(repo_name, hf_token):
+            self.logger.error("Failed to access/create repository")
+            return
 
         # Read and group data
         with open(input_file, 'r', encoding='utf-8') as f:
@@ -312,13 +338,25 @@ class DatasetConverter:
         # Split the data
         splits, split_names = self.split_data(all_videos)
         
-        # Process and write each split
+        # Process splits and create datasets
+        datasets = {}
+        current_id = 0
+        
         for split_name, videos in zip(split_names, splits):
-            output_path = output_dir / f'{split_name}.jsonl'
-            
             all_dialogues = []
             for _, video_data in videos:
-                dialogues = self.process_video_dialogues(video_data)
+                dialogues = self.process_video_dialogues(video_data, current_id)
                 all_dialogues.extend(dialogues)
+                current_id += len(dialogues)
             
-            self.write_jsonl(all_dialogues, output_path)
+            # Convert to HF Dataset
+            dataset = Dataset.from_list(all_dialogues)
+            datasets[split_name] = dataset
+        
+        # Create DatasetDict and push to hub
+        dataset_dict = DatasetDict(datasets)
+        try:
+            dataset_dict.push_to_hub(repo_name, token=hf_token, commit_message=commit_message)
+            self.logger.info(f"Successfully pushed dataset to {repo_name}")
+        except Exception as e:
+            self.logger.error(f"Error pushing to Hugging Face: {str(e)}")

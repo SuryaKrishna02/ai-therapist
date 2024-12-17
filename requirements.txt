@@ -11,11 +11,17 @@
 tqdm==4.67.1
 pandas==2.2.3
 backoff==2.2.1
+datasets==3.2.0
+tabulate==0.9.0
+seaborn==0.13.2
 colorlog==6.9.0
 ratelimit==2.2.1
 requests==2.32.3
+matplotlib==3.9.3
 assemblyai==0.34.0
 yt-dlp==2024.10.22
+scikit-learn==1.6.0
+huggingface-hub==0.27.0
 opencv-python==4.10.0.84
 google-cloud-aiplatform==1.74.0
 google-api-python-client==2.149.0
@@ -56,5 +62,4 @@ uvicorn
 fastapi
 tensorboard
 wandb
-tabulate
 spaces==0.29.2

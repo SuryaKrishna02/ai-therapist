@@ -33,6 +33,9 @@ LOCATION = "us-central1"
 PROJECT_ID = "x-casing-442000-s1"
 MODEL_NAME = "gemini-1.5-flash-002"
 DATA_BUCKET_NAME = "ai-therapist-data"
+REPO_NAME = "SuryaKrishna02/therapy-instruct"
+HF_TOKEN = "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"
+COMMIT_MESSAGE = "Added therapy instruct dataset"
 
 # Data processing configurations
 CONTEXT_WINDOW = 5
