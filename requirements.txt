@@ -48,6 +48,7 @@ httpx==0.24.1
 requests==2.32.3
 
 # Utilities
+python-dotenv==1.0.1
 tqdm==4.67.1
 backoff==2.2.1
 tabulate==0.9.0
