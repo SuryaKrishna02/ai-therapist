@@ -1,9 +1,17 @@
+import os
+from pathlib import Path
+from dotenv import load_dotenv
 from vertexai.generative_models import (
     HarmCategory,
     HarmBlockThreshold,
     SafetySetting,
     GenerationConfig
 )
+
+root_dir = Path(__file__).parent.parent
+
+# Load the .env file from root directory
+load_dotenv(root_dir / '.env')
 
 # Safety settings configuration
 SAFETY_CONFIG = [
@@ -29,12 +37,12 @@ GENERATION_CONFIG = GenerationConfig(
 
 MAX_RETRIES = 3
 CALLS_PER_MINUTE = 60
-LOCATION = "us-central1"
-PROJECT_ID = "x-casing-442000-s1"
-MODEL_NAME = "gemini-1.5-flash-002"
-DATA_BUCKET_NAME = "ai-therapist-data"
-REPO_NAME = "SuryaKrishna02/therapy-instruct"
-HF_TOKEN = "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"
+LOCATION = os.getenv("LOCATION")
+PROJECT_ID = os.getenv("PROJECT_ID")
+MODEL_NAME = os.getenv("MODEL_NAME")
+DATA_BUCKET_NAME = os.getenv("DATA_BUCKET_NAME")
+DATA_REPO_NAME = os.getenv("DATA_REPO_NAME")
+HF_TOKEN = os.getenv("HF_TOKEN")
 COMMIT_MESSAGE = "Added therapy instruct dataset"
 
 # Data processing configurations

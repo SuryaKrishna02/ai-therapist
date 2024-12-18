@@ -5,7 +5,7 @@ from preprocessor import TranscriptProcessor
 from constants import (
     PROJECT_ID,
     DATA_BUCKET_NAME,
-    REPO_NAME,
+    DATA_REPO_NAME,
     HF_TOKEN,
     COMMIT_MESSAGE
 )
@@ -48,7 +48,7 @@ try:
     post_processor = DatasetConverter()
     post_processor.process_and_push_to_hf(
         input_file=annotated_transcripts_path, 
-        repo_name=REPO_NAME,
+        repo_name=DATA_REPO_NAME,
         hf_token=HF_TOKEN,
         commit_message=COMMIT_MESSAGE
         )

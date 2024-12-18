@@ -2,7 +2,7 @@ import os
 import torch
 from hf import push_to_hub
 from config import TrainingConfig
-from train import (
+from utils import (
     apply_lora_adapters, 
     load_and_prepare_dataset, 
     load_model_and_tokenizer, 

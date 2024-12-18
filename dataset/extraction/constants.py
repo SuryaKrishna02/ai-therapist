@@ -1,9 +1,16 @@
 import os
+from pathlib import Path
+from dotenv import load_dotenv
 
-DATA_BUCKET_NAME = "ai-therapist-data"
+root_dir = Path(__file__).parent.parent
+
+# Load the .env file from root directory
+load_dotenv(root_dir / '.env')
+
+DATA_BUCKET_NAME = os.getenv("DATA_BUCKET_NAME")
 DATA_DIR = "../data"
-YOUTUBE_API_KEY = os.environ.get('YOUTUBE_API_KEY', 'AIzaSyAE1ad6U3fy-Q4TyoIkzWHhWTX8FSwF9-Y')
-ASSEMBLYAI_API_KEY = os.environ.get('ASSEMBLYAI_API_KEY', '9af21f3f8465492486d796fc8825cbe5')
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+ASSEMBLYAI_API_KEY = os.getenv("ASSEMBLYAI_API_KEY")
 PLAYLIST_IDS = [
     "PLEJO7-F_VqlPA0GmswOTvR1xM5TCeFCfM",
     "PLG1WzYaHQeh6JPLZcavyPLiz0ST4K406B",

@@ -1,4 +1,12 @@
+import os
+from pathlib import Path
+from dotenv import load_dotenv
 from dataclasses import dataclass
+
+root_dir = Path(__file__).parent.parent
+
+# Load the .env file from root directory
+load_dotenv(root_dir / '.env')
 
 @dataclass
 class ModelConfig:
@@ -24,6 +32,6 @@ class TrainingConfig:
 @dataclass
 class HFConfig:
     """Configuration for HuggingFace"""
-    REPO_ID: str = "SuryaKrishna02/Qwen2.5-7B-therapy"  # Change this
-    TOKEN: str = "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"  # Change this to your HF token
+    REPO_ID: str = os.getenv("MODEL_REPO_NAME")
+    TOKEN: str = os.getenv("HF_TOKEN")
     COMMIT_MESSAGE: str = "Add fine-tuned model with LoRA adapters"
